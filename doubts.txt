@@ -1,0 +1,4 @@
+git init: Creates a hidden .git folder where all of Git's tracking information will be stored.where is 
+this trackjer in our computer and why is it required when we are storing it all in git hub, git branch 
+-M main: A modern best practice. It renames the default branch from master to main., what is master and
+ whats the need to rename it to main,

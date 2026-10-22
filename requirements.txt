@@ -1,0 +1,20 @@
+# Computer Vision & Image Processing
+ultralytics>=8.0.0
+opencv-python-headless>=4.8.0
+onnxruntime>=1.16.0
+Pillow>=10.0.0
+
+# Audio & Speech Processing
+soundfile>=0.12.1
+numpy>=1.24.0
+
+# Local SLM & Data Validation
+requests>=2.31.0
+pydantic>=2.5.0
+
+# User Interface
+gradio>=4.0.0
+
+# Development & Testing
+pytest>=7.4.0
+python-dotenv>=1.0.0

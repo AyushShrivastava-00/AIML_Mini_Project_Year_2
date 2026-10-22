@@ -1,0 +1,25 @@
+#virtual environment
+venv/
+env/
+
+#python catche files
+__pycache__/
+*.pyc
+
+#heavy model weights files
+model/*.onnx
+model/*.pt
+model/*.bin
+
+#data
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+#environment and credentials
+.env
+
+#folder icon
+.DS_Store
+Thumbs.db
