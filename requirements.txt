@@ -18,3 +18,6 @@ gradio>=4.0.0
 # Development & Testing
 pytest>=7.4.0
 python-dotenv>=1.0.0
+
+#data visualisation
+matplotlib>=3.7.0
