@@ -1,41 +1,36 @@
-# 📈 Project Progress Tracker
+# 📈 Project Sprint Tracker (7-Day Plan)
 
-This document serves as an active log of the engineering milestones and learning outcomes achieved throughout the 8-week development cycle of the **Micro-Merchant Informal Credit Assessment Engine**.
+This document tracks the daily engineering milestones and academic concepts mastered during the development of the **Micro-Merchant Informal Credit Assessment Engine**.
 
 ---
 
-## 📅 Week 1: Project Scaffolding, Environment Design & Image Physics
-
-### 🚀 Week 1 — Day 1: Project Scaffolding & Environment Setup
-- **Milestone Completed**: Established a clean, modular directory structure and configured the virtual environment and local version control.
+## 📅 Day 1: System Scaffolding, Image Physics & Visual Foundations
+- **Milestone Completed**: Established a clean project directory architecture, configured an isolated Python virtual environment, and built the single-box coordinate visualizer in VS Code.
 - **Key Files Created**:
-  - `requirements.txt`: Specified production package versions (`ultralytics`, `opencv-python-headless`, `onnxruntime`, `Pillow`, `gradio`, `pytest`).
-  - `.gitignore`: Implemented strict exclusion rules for virtual environment files (`venv/`), operating system caches, and heavy deep learning model weights (`.pt`, `.onnx`).
-  - `README.md`: Created the landing page with the project scope, problem statement, architecture, and tech stack details.
+  - `requirements.txt`: Specified package versions (`ultralytics`, `opencv-python-headless`, `Pillow`, `matplotlib`, `pydantic`).
+  - `.gitignore`: Implemented strict exclusion rules for virtual environments (`venv/`), system caches, and heavy deep learning weights (`models/*.pt`, `models/*.onnx`).
+  - `README.md`: Documented project architecture, problem statement, and repository layout.
+  - `notebooks/01_eda_sku110k.ipynb`: Interactive notebook for coordinate math and visual rendering.
 - **Concepts Mastered**:
-  - **Virtual Environment (`venv`)**: Understanding why project libraries must be isolated to prevent dependency version collisions.
-  - **Git vs. GitHub**: Understanding that Git is an offline, local version control database (`.git` folder) while GitHub is simply a remote, collaborative hosting mirror.
-  - **Branch Semantics**: Learned why modern repositories use `main` as the primary branch timeline instead of the outdated `master` label.
+  - **Process Isolation**: How virtual environments prevent system-wide dependency collisions.
+  - **Memory Layouts**: Digital images represented as 3D NumPy matrices of `uint8` values ($0 \dots 255$); swapping OpenCV's BGR order to RGB.
+  - **Coordinate Translation**: Mathematical conversion between normalized YOLO percentages ($c_x, c_y, w, h$) and discrete pixel corners ($x_1, y_1, x_2, y_2$).
+  - **Alpha Blending**: Mathematical color blending equation for semi-transparent bounding box overlays.
 
 ---
 
-### 👁️ Week 1 — Day 2: Bounding Box Mathematics & Single-Box Visualization
-- **Milestone Completed**: Configured VS Code Jupyter Kernel, loaded a raw local asset, and wrote the coordinate denormalization and alpha-channel drawing pipeline.
+## 📅 Day 2: Dense Shelf Detection & YOLOv8-Nano Model Training
+- **Milestone Completed**: Fine-tuned YOLOv8-Nano on dense retail shelf items using Google Colab T4 GPU; successfully saved trained model weights to `models/best.pt`.
 - **Key Files Created**:
-  - `notebooks/01_eda_sku110k.ipynb`: The interactive notebook containing path verification and custom drawing algorithms.
+  - `data.yaml`: Dataset configuration mapping retail item classes.
+  - `src/vision/train_yolo.py`: Python training reference pipeline.
+  - `models/best.pt`: Trained neural network weights (ignored by Git for lightweight repository).
 - **Concepts Mastered**:
-  - **Computer Graphics Coordinate Space**: Learned that digital images have their origin `(0,0)` in the top-left corner (increasing X moves right, increasing Y moves down).
-  - **YOLO Label format**: Dissected the normalized coordinates (`class_id`, `center_x`, `center_y`, `width`, `height`), understanding why values are scaled to decimals between `0.0` and `1.0` to maintain resolution independence.
-  - **Coordinate Translation Math**: Mastered the formulas to convert center percentages back to pixel integers:
-    - $C_x = c_x \times W$, $C_y = c_y \times H$, $P_w = w \times W$, $P_h = h \times H$
-    - $x_1 = C_x - (P_w / 2)$, $y_1 = C_y - (P_h / 2)$
-    - $x_2 = C_x + (P_w / 2)$, $y_2 = C_y + (P_h / 2)$
-  - **Memory Representation & Color Conversion**: Studied how raw image arrays are structured as 3D NumPy matrices of `uint8` values in memory. Swapped color dimensions from OpenCV's BGR order to standard RGB to prevent color inversion.
-  - **Alpha Blending**: Explored how the CPU uses mathematical weight equations to mix new color layers with existing pixel backgrounds, creating the illusion of semi-transparent bounding box overlays.
-  - **Zero-Copy Hand-off**: Integrated OpenCV (preprocessing entry point) with Pillow (RGBA rendering presentation layer) without duplicating the pixel matrices in memory, saving system RAM.
+  - **YOLOv8 Anatomy**: Backbone (CSPDarknet feature extraction), Neck (PAN-FPN multi-scale feature fusion), and Anchor-Free Head.
+  - **Loss Mathematics**: Complete IoU Loss ($\mathcal{L}_{\text{CIoU}}$) measuring overlap, center point distance, and aspect ratio consistency, coupled with Binary Cross-Entropy ($\mathcal{L}_{\text{BCE}}$) for foreground-background separation.
+  - **Academic Evaluation Metrics**: Mean Average Precision (**mAP@50**), Precision-Recall trade-offs, and confusion matrix interpretation.
 
 ---
 
-## 📊 Next Session (Week 1 — Day 3)
-- **Goal**: Multi-line label parsing and dense layout exploration.
-- **Focus**: We will take the single-box logic we wrote today and write a loop-driven file stream parser to read and draw dozens of overlapping packages over a busy retail shelf image from the SKU-110K dataset.
+## 📅 Next Sprint (Day 3): Edge Optimization — ONNX Export & INT8 Quantization
+- **Goal**: Convert `best.pt` to hardware-neutral ONNX format and apply post-training INT8 quantization to achieve sub-200ms CPU inference on edge devices.
