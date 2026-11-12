@@ -10,6 +10,8 @@ __pycache__/
 model/*.onnx
 model/*.pt
 model/*.bin
+models/whisper/
+models/whisper/**
 
 #data
 data/raw/*
@@ -23,3 +25,6 @@ data/processed/*
 #folder icon
 .DS_Store
 Thumbs.db
+
+#miscelennaous
+doubts.txt
