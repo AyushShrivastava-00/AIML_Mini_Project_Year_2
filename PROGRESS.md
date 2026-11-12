@@ -33,20 +33,18 @@ This document tracks the daily engineering milestones and academic concepts mast
 ---
 
 ## 📅 Day 3: Edge Optimization — ONNX Export & CPU Inference Benchmarking
-- **Milestone Completed**: Successfully exported fine-tuned YOLOv8 model to hardware-neutral ONNX format; built lightweight, pure CPU inference engine achieving sub-200ms latency.
+- **Milestone Completed**: Successfully exported fine-tuned YOLOv8 model to hardware-neutral ONNX format; built lightweight CPU inference engine achieving sub-200ms latency; verified detections on dense retail shelf image with Non-Maximum Suppression (NMS).
 - **Key Files Created**:
   - `src/vision/export_onnx.py`: Static graph export pipeline.
   - `src/vision/inference.py`: CPU-optimized inventory evaluation engine.
+  - `src/vision/test_onnx_shelf.py`: NMS-filtered local shelf verification script.
+  - `create_shelf_image.py`: Synthetic dense shelf test fixture generator.
   - `models/best.onnx`: Exported ONNX graph model (Git-ignored).
 - **Concepts Mastered**:
-  - **Static Graph Compilation**: How ONNX decouples models from the Python runtime, executing graph nodes directly via C++ instruction sets.
+  - **Static Graph Compilation**: How ONNX decouples models from Python runtime, executing graph nodes directly via C++ instruction sets.
   - **Quantization Mathematics**: Mapping continuous 32-bit floats ($\text{FP32}$) to discrete 8-bit integers ($\text{INT8}$) via affine linear scaling: $q = \text{round}(r/S) + Z$.
   - **Hardware Vectorization (SIMD)**: Why 8-bit integers allow 64-bit CPU registers to perform 8 simultaneous operations per clock cycle instead of 2.
-  - **Latency SLA Verification**: Benchmarked inference latency on CPU, proving adherence to the sub-200ms non-functional requirement.
-- **Next Sprint (Day 4)**:
-  - Voice interview processing using Whisper.
-  - Audio normalization and 16kHz downsampling.
-  - Multilingual interview transcription pipeline.
+  - **Non-Maximum Suppression (NMS)**: Post-processing filtering that eliminates redundant overlapping candidate boxes using IoU thresholding.
 
 ---
 
@@ -62,8 +60,8 @@ This document tracks the daily engineering milestones and academic concepts mast
   - **Time-to-Frequency Transforms**: Short-Time Fourier Transforms (STFT), Mel-scale non-linear auditory filtering, and Log-Mel spectrogram generation ($80 \times 3000$ tensors).
   - **Transformer Encoder-Decoder for Speech**: Self-attention over acoustic spectrograms, cross-attention in the decoder, and language token conditioning.
   - **Real-Time Factor (RTF)**: Benchmarked transcription velocity ($\text{RTF} = 0.16\times$), proving adherence to sub-5s processing latency.
-- **Next Sprint (Day 5)**:
-  - Generative AI financial underwriting using local Small Language Models (SLM).
-  - Deploying Qwen-2.5-1.5B via Ollama.
-  - Formulating strict financial prompts and Pydantic JSON schemas.
 
+---
+
+## 📅 Next Sprint (Day 5): Generative Underwriting — Local SLM & Pydantic JSON
+- **Goal**: Connect an on-device Small Language Model (Qwen-2.5-1.5B via Ollama) to cross-verify visual shelf inventory against the audio transcript using financial stress tests, outputting an explainable credit score (300–850) in strict Pydantic JSON format.
