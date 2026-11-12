@@ -30,3 +30,4 @@ An on-device, privacy-preserving AI micro-auditing application that:
 │ ├── slm/ # Reasoning prompt & JSON validation
 │ └── pipeline/ # Orchestration engine
 └── tests/ # Automated test suites5
+
