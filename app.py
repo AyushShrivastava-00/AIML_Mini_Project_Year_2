@@ -121,6 +121,9 @@ with gr.Blocks(title="Micro-Merchant Credit Engine", css=custom_css, theme=gr.th
         inputs=[image_input, audio_input],
         outputs=[annotated_output, scorecard_output, transcript_box]
     )
-
 if __name__ == "__main__":
-    demo.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True)
+    import os
+    # Read cloud port dynamically, fallback to 7860 locally
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port)
+
