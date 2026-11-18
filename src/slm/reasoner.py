@@ -3,6 +3,7 @@ Multi-Tier Underwriting Engine:
 Tier 1: Local Ollama (offline edge execution on local laptop)
 Tier 2: Hosted Neural Model via Groq Cloud (allam-2-7b on LPU)
 Tier 3: Dynamic Financial NLP Engine (Fail-safe fallback)
+Includes Programmatic Financial Guardrails against LLM instruction drift.
 """
 import os
 import re
@@ -16,7 +17,6 @@ class CreditUnderwritingEngine:
         self.api_url = f"{base_url}/api/generate"
 
     def get_groq_key(self):
-        """Retrieves Groq API key from Streamlit secrets or OS environment."""
         key = os.environ.get("GROQ_API_KEY")
         if not key:
             try:
@@ -28,7 +28,6 @@ class CreditUnderwritingEngine:
         return key
 
     def extract_stated_revenue(self, text):
-        """Extracts stated daily revenue dynamically using regex."""
         text_lower = text.lower()
         rev_match = re.search(r"(?:daily sales|daily turnover|daily revenue|earn daily|sales per day|sales are around|sales are)\s*(?:around|of|is)?\s*(?:rs\.?|rupees|inr)?\s*([0-9]+(?:,[0-9]+)?)", text_lower)
         if rev_match:
@@ -59,22 +58,11 @@ AUDIT TELEMETRY:
 - Stated Monthly Revenue: {monthly_sales:.0f} INR
 - Monthly Inventory Turnover Rate: {turnover_rate:.2f}x
 
-CRITICAL UNDERWRITING LAWS (FOLLOW STRICTLY):
-1. Normal grocery inventory turnover is 1.5x to 3.0x per month.
-2. IF Turnover Rate > 4.0x OR ({visual_items_count} < 25 items AND daily sales > 5000 INR):
-   - This is SEVERE REVENUE INFLATION / FRAUD! A merchant cannot sell 200x their visible stock.
-   - You MUST assign:
-     "risk_tier": "Severe",
-     "credit_score": an integer between 350 and 420 (NEVER above 450),
-     "recommended_loan_limit": 2500.0 (NEVER above 5000),
-     "inventory_to_sales_ratio": "Severe Discrepancy",
-     "discrepancy_flags": ["Severe turnover discrepancy", "Claimed sales mathematically incompatible with stock"]
-3. IF Turnover Rate is between 1.5x and 3.5x AND {visual_items_count} >= 30 items:
-   - This is a healthy, verified merchant.
-   - Assign: "risk_tier": "Low", "credit_score": 720 to 760, "recommended_loan_limit": 35000.0 to 45000.0.
+CRITICAL UNDERWRITING LAWS:
+1. If Turnover Rate > 4.0x: Assign risk_tier "Severe", credit_score between 350 and 420, and recommended_loan_limit 2500.
+2. If Turnover Rate is between 1.5x and 3.5x AND {visual_items_count} >= 30 items: Assign risk_tier "Low", credit_score 720 to 760, and loan limit 35000 to 45000.
 
-OUTPUT REQUIREMENT:
-Respond ONLY with a single JSON object. Do not include markdown codeblocks or commentary:
+OUTPUT STRICTLY AS RAW JSON MATCHING THIS EXACT SCHEMA:
 {{
   "merchant_name": "<extracted full name>",
   "credit_score": <integer>,
@@ -91,7 +79,7 @@ Respond ONLY with a single JSON object. Do not include markdown codeblocks or co
   }}
 }}
 """
-        return prompt
+        return prompt, turnover_rate, daily_sales
 
     def dynamic_rule_engine(self, visual_items_count, shelf_fill_pct, interview_transcript):
         text = interview_transcript.strip()
@@ -117,8 +105,7 @@ Respond ONLY with a single JSON object. Do not include markdown codeblocks or co
         monthly_cogs = monthly_revenue * 0.80
         turnover_rate = round(monthly_cogs / max(eiv * 4.0, 1.0), 2)
 
-        # Dynamic Branching Logic
-        if visual_items_count < 20 and daily_revenue > 5000.0:
+        if visual_items_count < 25 and daily_revenue > 5000.0:
             credit_score = 380
             risk_tier = "Severe"
             loan_limit = 2500.0
@@ -165,7 +152,7 @@ Respond ONLY with a single JSON object. Do not include markdown codeblocks or co
         )
 
     def evaluate_merchant(self, visual_items_count, shelf_fill_pct, interview_transcript):
-        prompt = self.formulate_system_prompt(visual_items_count, shelf_fill_pct, interview_transcript)
+        prompt, turnover_rate, daily_sales = self.formulate_system_prompt(visual_items_count, shelf_fill_pct, interview_transcript)
 
         # ── TIER 1: Local Ollama Daemon (Offline Edge) ───────────────────
         try:
@@ -207,7 +194,18 @@ Respond ONLY with a single JSON object. Do not include markdown codeblocks or co
                 json_str = clean_match.group(0) if clean_match else raw_content.strip()
                 
                 decision = CreditUnderwritingDecision(**json.loads(json_str))
-                decision.underwriting_rationale = "[Tier 2: Groq Cloud Neural Engine (allam-2-7b)] " + decision.underwriting_rationale
+                
+                # ── PROGRAMMATIC FINANCIAL GUARDRAIL ───────────────────────
+                if turnover_rate > 4.0 or (visual_items_count < 25 and daily_sales > 5000.0):
+                    decision.credit_score = min(decision.credit_score, 380)
+                    decision.risk_tier = "Severe"
+                    decision.recommended_loan_limit = min(decision.recommended_loan_limit, 2500.0)
+                    decision.financial_metrics.inventory_to_sales_ratio = "Severe Discrepancy"
+                    if not decision.discrepancy_flags:
+                        decision.discrepancy_flags = ["Severe turnover discrepancy", "Revenue inflation detected"]
+                # ───────────────────────────────────────────────────────────
+
+                decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine (allam-2-7b)] " + decision.underwriting_rationale
                 return decision
 
             except Exception as e:
