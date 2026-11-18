@@ -1,36 +1,36 @@
 """
 Micro-Merchant Informal Credit Assessment Engine - Streamlit Cloud Web Application.
-Interactive field loan officer dashboard.
 """
-
-from PIL import Image
-from src.pipeline.orchestrator import CreditAuditPipeline
 import os
 import sys
 import tempfile
-import streamlit as st
 
-# 1. Ensure project root is in sys.path
+# 1. Path setup MUST be first
 ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-# 2. Automatically copy Streamlit secrets into os.environ for Hugging Face and Whisper
-if hasattr(st, "secrets"):
-    for key, value in st.secrets.items():
-        if isinstance(value, str):
-            os.environ[key] = value
+# 2. Inject Streamlit secrets into environment
+try:
+    import streamlit as st
+    if hasattr(st, "secrets"):
+        for key, value in st.secrets.items():
+            if isinstance(value, str):
+                os.environ[key] = value
+except Exception:
+    pass
 
+# 3. Third-party and local imports
+import streamlit as st
+from PIL import Image
 from src.pipeline.orchestrator import CreditAuditPipeline
 
-# Set Page Config
 st.set_page_config(
     page_title="Micro-Merchant Credit Assessment Engine",
     page_icon="🏪",
     layout="wide"
 )
 
-# Cache pipeline loading so it only initializes once in memory
 @st.cache_resource
 def load_pipeline():
     return CreditAuditPipeline(
@@ -41,10 +41,10 @@ def load_pipeline():
 
 pipeline = load_pipeline()
 
-# Title and Header
 st.title("🏪 Micro-Merchant Informal Credit Assessment Engine")
 st.markdown("### *Edge Vision + Voice Multi-Modal Underwriting for Financial Inclusion*")
 st.write("---")
+
 col_input, col_output = st.columns(2, gap="large")
 
 with col_input:
@@ -60,7 +60,7 @@ with col_input:
         type=["wav", "mp3", "m4a"]
     )
     
-    run_audit_btn = st.button("⚡ Run AI Micro-Audit", type="primary", width="stretch")
+    run_audit_btn = st.button("⚡ Run AI Micro-Audit", type="primary", use_container_width=True)
 
 with col_output:
     st.subheader("📊 Multi-Modal Underwriting Output")
@@ -70,7 +70,6 @@ with col_output:
             st.warning("⚠️ Please upload both a shelf inspection image/video and an interview recording.")
         else:
             with st.spinner("Executing ONNX Vision, Whisper STT, and Financial Cross-Verification..."):
-                # Save uploaded files temporarily to disk for our pipeline to read
                 img_suffix = "." + uploaded_image.name.split(".")[-1]
                 with tempfile.NamedTemporaryFile(delete=False, suffix=img_suffix) as tmp_img:
                     tmp_img.write(uploaded_image.read())
@@ -82,17 +81,12 @@ with col_output:
                     tmp_audio_path = tmp_audio.name
 
                 try:
-                    # Run orchestrator
                     results = pipeline.run_full_audit(media_path=tmp_img_path, audio_path=tmp_audio_path)
                     decision = results["decision"]
 
-                    # Display Visual Detections
-                    st.image(results["annotated_image"], caption=f"YOLOv8 INT8 Detection: {results['detected_items']} items found ({results['shelf_fill_pct']:.0f}% fill)", width="stretch")
-                    
-                    # Display Audio Transcript
+                    st.image(results["annotated_image"], caption=f"YOLOv8 INT8 Detection: {results['detected_items']} items found ({results['shelf_fill_pct']:.0f}% fill)", use_container_width=True)
                     st.text_area("🎤 Whisper Audio Transcript", results["transcript"], height=100)
 
-                    # Determine color badge
                     score = decision.credit_score
                     if score >= 700:
                         score_color = "#22c55e"
@@ -104,7 +98,8 @@ with col_output:
                         score_color = "#ef4444"
                         badge_label = "HIGH / SEVERE RISK - CAUTION"
 
-                    # Scorecard Display
+                    engine_badge = getattr(decision, "engine_source", "Multi-Tier AI Underwriting")
+
                     st.markdown(f"""
                     <div style="background-color: #1e293b; color: white; padding: 20px; border-radius: 12px; margin-top: 15px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px;">
@@ -127,8 +122,9 @@ with col_output:
                             <b>Turnover Rate:</b> {decision.financial_metrics.inventory_turnover_rate:.2f}x/mo ({decision.financial_metrics.inventory_to_sales_ratio})<br>
                             <b>Underwriting Rationale:</b> {decision.underwriting_rationale}
                         </div>
-                        <div style="margin-top: 8px; text-align: right; font-size: 11px; color: #64748b;">
-                            Audit Turnaround: {results['total_latency_sec']}s (Edge Architecture)
+                        <div style="margin-top: 10px; display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8;">
+                            <span>Engine: <b style="color: #38bdf8;">{engine_badge}</b></span>
+                            <span>Audit Latency: {results['total_latency_sec']}s</span>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
