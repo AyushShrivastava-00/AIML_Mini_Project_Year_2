@@ -198,68 +198,50 @@ Respond ONLY with a single valid JSON object matching this schema:
             pass
 
             # ── TIER 2: Groq Cloud LPU Engine ──────────────────────────────
+                # ── TIER 2: Groq Cloud LPU Neural Engine ────────────────────────
         groq_key = self.get_groq_key()
         if groq_key:
             try:
                 from groq import Groq
                 client = Groq(api_key=groq_key)
                 
-                # Models with verified JSON-mode support on Groq
-                models_to_try = [
+                # Filter strictly for generative models (exclude prompt-guard classifiers and whisper audio models)
+                all_models = [m.id for m in client.models.list().data if "prompt-guard" not in m.id and "whisper" not in m.id]
+                
+                preferred_order = [
                     "llama-3.3-70b-versatile",
                     "llama-3.1-8b-instant",
                     "llama3-8b-8192",
-                    "mixtral-8x7b-32768"
+                    "mixtral-8x7b-32768",
+                    "gemma2-9b-it"
                 ]
                 
-                messages = [
-                    {"role": "system", "content": "You are a professional microfinance credit risk auditor. You MUST output ONLY valid JSON matching the exact schema."},
-                    {"role": "user", "content": prompt}
-                ]
-                
-                raw_content = None
-                model_used = None
-                
-                for candidate_model in models_to_try:
-                    try:
-                        # Attempt with native JSON mode
-                        chat_completion = client.chat.completions.create(
-                            messages=messages,
-                            model=candidate_model,
-                            temperature=0.1,
-                            max_tokens=400,
-                            response_format={"type": "json_object"}
-                        )
-                        raw_content = chat_completion.choices[0].message.content
-                        model_used = candidate_model
+                target_model = None
+                for p in preferred_order:
+                    if p in all_models:
+                        target_model = p
                         break
-                    except Exception as json_err:
-                        # If model doesn't support response_format, retry without it
-                        if "response_format" in str(json_err):
-                            try:
-                                chat_completion = client.chat.completions.create(
-                                    messages=messages,
-                                    model=candidate_model,
-                                    temperature=0.1,
-                                    max_tokens=400
-                                )
-                                raw_content = chat_completion.choices[0].message.content
-                                model_used = candidate_model
-                                break
-                            except Exception:
-                                continue
-                        else:
-                            continue
+                if not target_model:
+                    target_model = all_models[0] if all_models else "llama-3.3-70b-versatile"
 
-                if raw_content:
-                    # Clean markdown code blocks and extract JSON payload
-                    clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
-                    json_str = clean_match.group(0) if clean_match else raw_content.strip()
-                    
-                    decision = CreditUnderwritingDecision(**json.loads(json_str))
-                    decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine ({model_used})] " + decision.underwriting_rationale
-                    print(f"[SUCCESS] Underwritten via Groq Neural Model ({model_used})")
-                    return decision
+                chat_completion = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": "You are a professional microfinance credit risk auditor. Output strictly a single raw JSON object matching the requested schema. No code blocks, no introductory text."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    model=target_model,
+                    temperature=0.1,
+                    max_tokens=400
+                )
+                
+                raw_content = chat_completion.choices[0].message.content
+                clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                json_str = clean_match.group(0) if clean_match else raw_content.strip()
+                
+                decision = CreditUnderwritingDecision(**json.loads(json_str))
+                decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine ({target_model})] " + decision.underwriting_rationale
+                print(f"[SUCCESS] Underwritten via Groq ({target_model})")
+                return decision
 
             except Exception as e:
                 err_msg = f"Groq Error: {type(e).__name__} - {str(e)}"
@@ -267,6 +249,7 @@ Respond ONLY with a single valid JSON object matching this schema:
                 fallback_decision = self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
                 fallback_decision.underwriting_rationale = f"[{err_msg}] " + fallback_decision.underwriting_rationale
                 return fallback_decision
+
 
         # ── TIER 3: Dynamic Financial NLP Engine ────────────────────────
         return self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
