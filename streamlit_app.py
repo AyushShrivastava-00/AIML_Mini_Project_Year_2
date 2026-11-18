@@ -50,7 +50,7 @@ with col_input:
         type=["wav", "mp3", "m4a"]
     )
     
-    run_audit_btn = st.button("⚡ Run AI Micro-Audit", type="primary", use_container_width=True)
+    run_audit_btn = st.button("⚡ Run AI Micro-Audit", type="primary", width="stretch")
 
 with col_output:
     st.subheader("📊 Multi-Modal Underwriting Output")
@@ -77,7 +77,7 @@ with col_output:
                     decision = results["decision"]
 
                     # Display Visual Detections
-                    st.image(results["annotated_image"], caption=f"YOLOv8 INT8 Detection: {results['detected_items']} items found ({results['shelf_fill_pct']:.0f}% fill)", use_container_width=True)
+                    st.image(results["annotated_image"], caption=f"YOLOv8 INT8 Detection: {results['detected_items']} items found ({results['shelf_fill_pct']:.0f}% fill)", width="stretch")
                     
                     # Display Audio Transcript
                     st.text_area("🎤 Whisper Audio Transcript", results["transcript"], height=100)
