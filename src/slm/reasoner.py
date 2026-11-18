@@ -196,13 +196,25 @@ OUTPUT STRICTLY AS RAW JSON MATCHING THIS EXACT SCHEMA:
                 decision = CreditUnderwritingDecision(**json.loads(json_str))
                 
                 # ── PROGRAMMATIC FINANCIAL GUARDRAIL ───────────────────────
+                                # ── PROGRAMMATIC FINANCIAL GUARDRAIL ───────────────────────
                 if turnover_rate > 4.0 or (visual_items_count < 25 and daily_sales > 5000.0):
                     decision.credit_score = min(decision.credit_score, 380)
                     decision.risk_tier = "Severe"
                     decision.recommended_loan_limit = min(decision.recommended_loan_limit, 2500.0)
                     decision.financial_metrics.inventory_to_sales_ratio = "Severe Discrepancy"
-                    if not decision.discrepancy_flags:
-                        decision.discrepancy_flags = ["Severe turnover discrepancy", "Revenue inflation detected"]
+                    decision.discrepancy_flags = [
+                        "Severe turnover discrepancy",
+                        f"Claimed revenue (₹{daily_sales:,.0f}/day) unsupported by visible stock ({visual_items_count} items)"
+                    ]
+                    # Enforce that the rationale explicitly explains the fraud flag:
+                    decision.underwriting_rationale = (
+                        f"Severe revenue inflation detected. Claimed monthly turnover of ₹{daily_sales * 30:,.0f} "
+                        f"cannot be supported by only {visual_items_count} visible shelf items. "
+                        f"Turnover rate ({turnover_rate:.1f}x) exceeds realistic retail limits. "
+                        f"Loan capped at emergency liquidation floor."
+                    )
+                # ───────────────────────────────────────────────────────────
+
                 # ───────────────────────────────────────────────────────────
 
                 decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine (allam-2-7b)] " + decision.underwriting_rationale
