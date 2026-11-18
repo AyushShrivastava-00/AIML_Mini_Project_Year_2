@@ -167,9 +167,11 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
         except Exception:
             pass
 
-        # ── TIER 2: Free Groq Cloud Neural Engine (Instant 0.4s response) ───
+                # ── TIER 2: Free Groq Cloud Neural Engine (Instant 0.4s response) ───
         groq_key = self.get_groq_key()
-        if groq_key:
+        if not groq_key:
+            print("[INFO] GROQ_API_KEY not found in secrets or environment.")
+        else:
             try:
                 from groq import Groq
                 client = Groq(api_key=groq_key)
@@ -190,11 +192,16 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
                 print("[SUCCESS] Underwritten using Tier 2: Groq Cloud Neural Model.")
                 return decision
             except Exception as e:
-                print(f"[INFO] Groq API note ({str(e)}), using Tier 3.")
+                err_msg = f"Groq Error: {type(e).__name__} - {str(e)}"
+                print(f"[ERROR] {err_msg}")
+                # Stamp the error into the rationale so you can see it live on screen!
+                fallback_decision = self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
+                fallback_decision.underwriting_rationale = f"[{err_msg}] " + fallback_decision.underwriting_rationale
+                return fallback_decision
 
         # ── TIER 3: Dynamic Financial NLP Engine ────────────────────────
-        print("[INFO] Underwritten using Tier 3: Dynamic Financial Engine.")
         return self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
+
 
 if __name__ == "__main__":
     print("CreditUnderwritingEngine ready!")
