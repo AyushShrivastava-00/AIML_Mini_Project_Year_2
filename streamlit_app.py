@@ -2,14 +2,24 @@
 Micro-Merchant Informal Credit Assessment Engine - Streamlit Cloud Web Application.
 Interactive field loan officer dashboard.
 """
+
+from PIL import Image
+from src.pipeline.orchestrator import CreditAuditPipeline
 import os
 import sys
 import tempfile
 import streamlit as st
-from PIL import Image
 
-# Ensure project root is in sys.path
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# 1. Ensure project root is in sys.path
+ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+# 2. Automatically copy Streamlit secrets into os.environ for Hugging Face and Whisper
+if hasattr(st, "secrets"):
+    for key, value in st.secrets.items():
+        if isinstance(value, str):
+            os.environ[key] = value
 
 from src.pipeline.orchestrator import CreditAuditPipeline
 
