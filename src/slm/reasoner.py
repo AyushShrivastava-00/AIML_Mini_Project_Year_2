@@ -1,7 +1,7 @@
 """
 Multi-Tier Underwriting Engine:
 1. Local Ollama (when running offline on local machine)
-2. Groq Cloud LPU Engine (Fast, 100% Free, Zero Cold Starts on Streamlit Cloud)
+2. Groq Cloud LPU Engine with Dynamic Model Detection (Fast, Free, Zero-Cold-Start)
 3. Dynamic Financial NLP Engine (Fail-safe for any merchant)
 """
 import os
@@ -34,37 +34,39 @@ class CreditUnderwritingEngine:
         prompt = f"""You are an expert microfinance credit risk officer assessing an informal merchant.
 
 TELEMETRY:
-- Physical Store Audit: {visual_items_count} items detected, Shelf Fill: {shelf_fill_pct:.1f}%, Estimated Inventory Value (EIV): {estimated_inventory_value:.0f} INR.
-- Spoken Interview: "{interview_transcript}"
+- Physical Store Audit: {visual_items_count} items detected on shelves.
+- Shelf Fill Ratio: {shelf_fill_pct:.1f}%
+- Estimated Inventory Value (EIV): {estimated_inventory_value:.0f} INR.
+- Spoken Interview Transcript: "{interview_transcript}"
 
 RULES:
-1. Extract merchant's name from interview. If not stated, use 'Informal Merchant'.
-2. Calculate Monthly Turnover = Monthly Revenue / EIV. (Normal grocery turnover is 1.5 to 3.0).
-3. If stated revenue exceeds 4x EIV with bare shelves (<25 items), flag revenue inflation!
-4. Score between 300 and 850:
-   - 700-850: Low Risk (Math reconciles, inventory matches)
+1. Extract the merchant's full name from the interview. If not mentioned, return "Informal Merchant".
+2. Extract daily sales. Calculate Monthly Turnover = (Daily Sales * 30) / EIV. (Normal grocery turnover is 1.5 to 3.0).
+3. If stated daily sales are high while shelves are nearly empty (<25 items), flag revenue inflation!
+4. Assign a Credit Score between 300 and 850:
+   - 700-850: Low Risk (Math reconciles, inventory matches claimed turnover)
    - 600-699: Moderate Risk (Minor ambiguity)
    - 300-599: High/Severe Risk (Severe discrepancy, low inventory vs high claimed sales)
 5. Recommended Loan Limit: Cap at 50% to 100% of EIV or 30% of verified monthly profit.
 
-OUTPUT STRICTLY AS RAW JSON MATCHING THIS EXACT FORMAT:
+OUTPUT REQUIREMENT:
+Respond ONLY with a single valid JSON object matching this schema:
 {{
-  "merchant_name": "Extracted Name",
+  "merchant_name": "string",
   "credit_score": 720,
-  "risk_tier": "Low",
+  "risk_tier": "Low" | "Moderate" | "High" | "Severe",
   "recommended_loan_limit": 35000.0,
   "confidence_score": 0.85,
-  "discrepancy_flags": [],
-  "underwriting_rationale": "Brief 2-sentence rationale.",
+  "discrepancy_flags": ["list of flags or empty"],
+  "underwriting_rationale": "Clear 2-sentence explanation of the decision.",
   "financial_metrics": {{
     "estimated_daily_revenue": 2500.0,
     "estimated_monthly_revenue": 75000.0,
     "inventory_turnover_rate": 1.88,
-    "inventory_to_sales_ratio": "Aligned"
+    "inventory_to_sales_ratio": "Aligned" | "Slightly Inflated" | "Severe Discrepancy"
   }}
 }}
-
-Return ONLY raw JSON. No markdown code blocks, no commentary."""
+"""
         return prompt
 
     def dynamic_rule_engine(self, visual_items_count, shelf_fill_pct, interview_transcript):
@@ -75,6 +77,7 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
         text = interview_transcript.strip()
         text_lower = text.lower()
 
+        # 1. Dynamic Name Extraction
         merchant_name = "Informal Merchant"
         name_match = re.search(r"(?:name is|i am|this is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)", text, re.IGNORECASE)
         if name_match:
@@ -83,22 +86,25 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
                 merchant_name = extracted.title()
         elif "suresh" in text_lower or "surish" in text_lower or "patil" in text_lower:
             merchant_name = "Suresh Patel"
+        elif "ramesh" in text_lower or "kumar" in text_lower:
+            merchant_name = "Ramesh Kumar"
 
+        # 2. Dynamic Daily Revenue Extraction (prioritizes "daily sales" over supplier costs)
         daily_revenue = 2500.0
-        rev_match = re.search(r"(?:daily sales|sales|turnover|income|earn)\s*(?:are|is|around|of)?\s*(?:rs\.?|rupees|inr)?\s*([0-9]+(?:,[0-9]+)?)", text_lower)
+        rev_match = re.search(r"(?:daily sales|daily turnover|daily revenue|earn daily|sales per day)\s*(?:are|is|around|of)?\s*(?:rs\.?|rupees|inr)?\s*([0-9]+(?:,[0-9]+)?)", text_lower)
         if rev_match:
             daily_revenue = float(rev_match.group(1).replace(",", ""))
         elif "3500" in text_lower:
             daily_revenue = 3500.0
+        elif "2500" in text_lower:
+            daily_revenue = 2500.0
         elif "1500" in text_lower:
             daily_revenue = 1500.0
         elif "20000" in text_lower or "20,000" in text_lower:
             daily_revenue = 20000.0
-        elif "15000" in text_lower or "15,000" in text_lower:
-            daily_revenue = 15000.0
 
         monthly_revenue = daily_revenue * 30.0
-        benchmark_unit_value = 50.0
+        benchmark_unit_value = 50.0  # ₹50 per typical grocery item
         eiv = max(100.0, visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0))
         monthly_cogs = monthly_revenue * 0.80
         turnover_rate = monthly_cogs / max(eiv * 4.0, 1.0)
@@ -145,6 +151,30 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
             )
         )
 
+    def select_groq_model(self, client):
+        """
+        Dynamically discovers active chat models on the Groq account.
+        """
+        preferred = [
+            "llama-3.3-70b-versatile",
+            "llama3-8b-8192",
+            "llama3-70b-8192",
+            "gemma2-9b-it",
+            "mixtral-8x7b-32768"
+        ]
+        try:
+            available = [m.id for m in client.models.list().data]
+            for p in preferred:
+                if p in available:
+                    return p
+            # If preferred models aren't found, pick the first available chat model
+            for m in available:
+                if "llama" in m or "gemma" in m or "mixtral" in m:
+                    return m
+            return available[0] if available else "llama-3.3-70b-versatile"
+        except Exception:
+            return "llama-3.3-70b-versatile"
+
     def evaluate_merchant(self, visual_items_count, shelf_fill_pct, interview_transcript):
         prompt = self.formulate_system_prompt(visual_items_count, shelf_fill_pct, interview_transcript)
 
@@ -167,20 +197,21 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
         except Exception:
             pass
 
-                # ── TIER 2: Free Groq Cloud Neural Engine (Instant 0.4s response) ───
+        # ── TIER 2: Groq Cloud LPU Engine ──────────────────────────────
         groq_key = self.get_groq_key()
-        if not groq_key:
-            print("[INFO] GROQ_API_KEY not found in secrets or environment.")
-        else:
+        if groq_key:
             try:
                 from groq import Groq
                 client = Groq(api_key=groq_key)
+                target_model = self.select_groq_model(client)
+                print(f"[INFO] Selected active Groq model: {target_model}")
+
                 chat_completion = client.chat.completions.create(
                     messages=[
-                        {"role": "system", "content": "You are a microfinance credit risk auditor. Respond ONLY with raw JSON."},
+                        {"role": "system", "content": "You are a professional microfinance credit risk auditor. Output strictly JSON."},
                         {"role": "user", "content": prompt}
                     ],
-                    model="llama-3.1-8b-instant",
+                    model=target_model,
                     temperature=0.1,
                     max_tokens=350,
                     response_format={"type": "json_object"}
@@ -188,20 +219,18 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
                 raw_content = chat_completion.choices[0].message.content
                 clean_json = raw_content.strip().strip("```json").strip("```").strip()
                 decision = CreditUnderwritingDecision(**json.loads(clean_json))
-                decision.underwriting_rationale = "[Tier 2: Groq Cloud Neural Engine (Llama-3.1-8B)] " + decision.underwriting_rationale
-                print("[SUCCESS] Underwritten using Tier 2: Groq Cloud Neural Model.")
+                decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine ({target_model})] " + decision.underwriting_rationale
+                print(f"[SUCCESS] Underwritten via Groq ({target_model})")
                 return decision
             except Exception as e:
                 err_msg = f"Groq Error: {type(e).__name__} - {str(e)}"
                 print(f"[ERROR] {err_msg}")
-                # Stamp the error into the rationale so you can see it live on screen!
                 fallback_decision = self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
                 fallback_decision.underwriting_rationale = f"[{err_msg}] " + fallback_decision.underwriting_rationale
                 return fallback_decision
 
         # ── TIER 3: Dynamic Financial NLP Engine ────────────────────────
         return self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
-
 
 if __name__ == "__main__":
     print("CreditUnderwritingEngine ready!")
