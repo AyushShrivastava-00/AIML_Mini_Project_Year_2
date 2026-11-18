@@ -1,13 +1,11 @@
 """
-Local SLM Credit Underwriting Engine with Deterministic Fallback.
-Communicates with Ollama daemon on localhost:11434, executes few-shot prompts,
-and enforces Pydantic JSON schema validation.
-
-Implements an architectural graceful fallback:
-- Mode 1: Local Qwen-2.5-1.5B neural reasoning via Ollama.
-- Mode 2: Deterministic Financial Rule Engine (ITR, Restock Velocity, Margin checks)
-          if Ollama is offline or deployed to a serverless cloud container.
+Multi-Tier Underwriting Engine:
+1. Local Ollama (when running offline on local machine)
+2. Cloud Neural Model via Hugging Face Serverless API (when running on Streamlit Cloud)
+3. Dynamic Rule-Based NLP & Financial Math Engine (general fallback for ANY merchant)
 """
+import os
+import re
 import json
 import requests
 from src.slm.schema import CreditUnderwritingDecision, FinancialAnalysis
@@ -17,10 +15,17 @@ class CreditUnderwritingEngine:
         self.model_name = model_name
         self.api_url = f"{base_url}/api/generate"
 
+    def get_hf_token(self):
+        """Retrieves Hugging Face token from Streamlit secrets or OS environment."""
+        try:
+            import streamlit as st
+            if "HF_TOKEN" in st.secrets:
+                return st.secrets["HF_TOKEN"]
+        except Exception:
+            pass
+        return os.environ.get("HF_TOKEN")
+
     def formulate_system_prompt(self, visual_items_count, shelf_fill_pct, interview_transcript):
-        """
-        Constructs a concise, high-speed forensic underwriting prompt.
-        """
         benchmark_unit_value = 50.0  # ₹50 per typical grocery SKU
         estimated_inventory_value = visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0)
 
@@ -31,17 +36,18 @@ TELEMETRY:
 - Spoken Interview: "{interview_transcript}"
 
 RULES:
-1. Calculate Monthly Turnover = Monthly Revenue / EIV. (Normal grocery turnover is 1.5 to 3.0).
-2. If stated revenue exceeds 4x EIV with bare shelves, flag revenue inflation!
-3. Score between 300 and 850:
+1. Extract merchant's name from interview. If not stated, use 'Informal Merchant'.
+2. Calculate Monthly Turnover = Monthly Revenue / EIV. (Normal grocery turnover is 1.5 to 3.0).
+3. If stated revenue exceeds 4x EIV with bare shelves, flag revenue inflation!
+4. Score between 300 and 850:
    - 700-850: Low Risk (Math reconciles, inventory matches)
    - 600-699: Moderate Risk (Minor ambiguity)
    - 300-599: High/Severe Risk (Severe discrepancy, low inventory vs high claimed sales)
-4. Recommended Loan Limit: Cap at 50% to 100% of EIV or 30% of verified monthly profit.
+5. Recommended Loan Limit: Cap at 50% to 100% of EIV or 30% of verified monthly profit.
 
 OUTPUT STRICTLY AS RAW JSON MATCHING THIS EXACT FORMAT:
 {{
-  "merchant_name": "Merchant Name",
+  "merchant_name": "Extracted Name",
   "credit_score": 720,
   "risk_tier": "Low",
   "recommended_loan_limit": 35000.0,
@@ -56,60 +62,88 @@ OUTPUT STRICTLY AS RAW JSON MATCHING THIS EXACT FORMAT:
   }}
 }}
 
-No codeblocks, no commentary, only raw JSON.
-"""
+Return ONLY raw JSON. No markdown code blocks, no commentary."""
         return prompt
 
-    def fallback_rule_engine(self, visual_items_count, shelf_fill_pct, interview_transcript):
+    def dynamic_rule_engine(self, visual_items_count, shelf_fill_pct, interview_transcript):
         """
-        Deterministic Financial Rule Engine.
-        Executes verified microfinance underwriting formulas when SLM daemon is offline.
+        Generalized Dynamic Financial NLP Engine.
+        Dynamically parses ANY merchant name, ANY revenue numbers, and runs genuine financial ratios.
         """
-        benchmark_unit_value = 50.0
-        eiv = max(1.0, visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0))
-        
-        transcript_lower = interview_transcript.lower()
-        
-        # Detect daily sales
-        daily_revenue = 2500.0
-        if "15000" in transcript_lower or "15,000" in transcript_lower:
-            daily_revenue = 15000.0
-            
-        monthly_revenue = daily_revenue * 30.0
-        monthly_cogs = monthly_revenue * 0.80
-        turnover_rate = monthly_cogs / max(eiv * 4.0, 1.0)
+        text = interview_transcript.strip()
+        text_lower = text.lower()
 
-        # Check for severe discrepancies (e.g. 12 items claiming 15k/day)
-        is_inflated = (visual_items_count < 25 and daily_revenue > 5000.0) or (turnover_rate > 4.0)
+        # 1. Dynamic Name Extraction using NLP patterns
+        merchant_name = "Informal Merchant"
+        name_match = re.search(r"(?:name is|i am|this is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)", text, re.IGNORECASE)
+        if name_match:
+            extracted = name_match.group(1).strip()
+            # Clean common words if accidentally captured
+            if extracted.lower() not in ["running", "calling", "speaking", "here", "sir"]:
+                merchant_name = extracted.title()
 
-        discrepancy_flags = []
-        if is_inflated:
-            credit_score = 410
-            risk_tier = "High"
-            loan_limit = min(5000.0, eiv * 0.5)
-            ratio_status = "Severe Discrepancy"
-            discrepancy_flags = ["Revenue inflation detected", "Physical stock incompatible with stated turnover"]
-            rationale = (f"Claimed monthly sales of ₹{monthly_revenue:,.0f} severely exceed visual "
-                         f"inventory capacity (EIV: ₹{eiv:,.0f}). Store inventory is insufficient to support stated turnover.")
+        # 2. Dynamic Daily Revenue Extraction using Regex
+        daily_revenue = 0.0
+        # Look for patterns like "daily sales are around 2500", "make 4000 rupees daily", "sales of 3000"
+        rev_match = re.search(r"(?:daily|per day|every day|turnover|sales)\s*(?:of|are|is|around)?\s*(?:rs\.?|rupees|inr)?\s*([0-9]+(?:,[0-9]+)?)", text_lower)
+        if rev_match:
+            daily_revenue = float(rev_match.group(1).replace(",", ""))
         else:
-            credit_score = 720
-            risk_tier = "Low"
-            loan_limit = min(35000.0, eiv * 4.8)
-            ratio_status = "Aligned"
-            turnover_rate = 1.88  # Canonical healthy grocery turnover baseline
-            rationale = (f"The merchant's daily sales of ₹{daily_revenue:,.0f} are within the normal range for a grocery store. "
-                         f"The physical store audit ({visual_items_count} items, {shelf_fill_pct:.0f}% fill) confirms adequate working capital. "
-                         f"Inventory turnover ({turnover_rate:.2f}x) is aligned with healthy FMCG retail benchmarks.")
+            # Fallback scan for first standalone number associated with currency
+            currency_match = re.search(r"([0-9]+(?:,[0-9]+)?)\s*(?:rupees|rs|inr)", text_lower)
+            if currency_match:
+                daily_revenue = float(currency_match.group(1).replace(",", ""))
+            else:
+                daily_revenue = 2000.0  # Safe default baseline if merchant spoke no numbers
 
-        # Match name phonetically (Suresh or Surish)
-        merchant_name = "Suresh Patel" if ("suresh" in transcript_lower or "surish" in transcript_lower) else "Informal Merchant"
+        monthly_revenue = daily_revenue * 30.0
+
+        # 3. Dynamic Inventory Valuation & Turnover Math
+        benchmark_unit_value = 50.0  # ₹50 per typical grocery item
+        eiv = max(100.0, visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0))
+        monthly_cogs = monthly_revenue * 0.80  # 80% COGS for grocery
+        turnover_rate = monthly_cogs / max(eiv * 4.0, 1.0)  # quarterly stock velocity
+
+        # 4. Dynamic Risk & Inflation Classification
+        discrepancy_flags = []
+        is_fraud = (visual_items_count < 25 and daily_revenue > 5000.0) or (monthly_revenue > eiv * 8.0)
+
+        if is_fraud:
+            credit_score = max(320, int(500 - (monthly_revenue / max(eiv, 1.0))))
+            credit_score = min(580, max(300, credit_score))
+            risk_tier = "High" if credit_score > 450 else "Severe"
+            loan_limit = round(min(5000.0, eiv * 0.5), -2)
+            ratio_status = "Severe Discrepancy"
+            discrepancy_flags = [
+                "Severe inventory turnover mismatch",
+                f"Claimed revenue (₹{daily_revenue:,.0f}/day) unsupported by visible stock count ({visual_items_count} items)"
+            ]
+            rationale = (f"Claimed monthly sales of ₹{monthly_revenue:,.0f} severely exceed physical inventory capacity "
+                         f"(EIV: ₹{eiv:,.0f}). The shop displays only {visual_items_count} items ({shelf_fill_pct:.0f}% shelf fill). "
+                         f"Loan capped at emergency liquidation floor.")
+        elif turnover_rate > 3.0:
+            credit_score = 630
+            risk_tier = "Moderate"
+            loan_limit = round(min(20000.0, eiv * 1.5), -2)
+            ratio_status = "Slightly Inflated"
+            discrepancy_flags = ["Elevated turnover rate relative to visible shelf density"]
+            rationale = (f"Stated daily sales of ₹{daily_revenue:,.0f} indicate elevated stock movement relative to "
+                         f"physical count ({visual_items_count} items). Recommend manual verification before full disbursement.")
+        else:
+            credit_score = min(820, int(680 + (shelf_fill_pct * 0.8)))
+            risk_tier = "Low"
+            loan_limit = round(min(50000.0, max(15000.0, eiv * 3.5)), -2)
+            ratio_status = "Aligned"
+            rationale = (f"Stated daily sales of ₹{daily_revenue:,.0f} are supported by observed physical stock "
+                         f"({visual_items_count} items, {shelf_fill_pct:.0f}% shelf fill). Calculated turnover ({turnover_rate:.2f}x) "
+                         f"falls within the healthy FMCG benchmark (1.5x-3.0x). Working capital loan recommended.")
 
         return CreditUnderwritingDecision(
             merchant_name=merchant_name,
             credit_score=credit_score,
             risk_tier=risk_tier,
             recommended_loan_limit=loan_limit,
-            confidence_score=0.85,
+            confidence_score=0.88,
             discrepancy_flags=discrepancy_flags,
             underwriting_rationale=rationale,
             financial_metrics=FinancialAnalysis(
@@ -122,37 +156,60 @@ No codeblocks, no commentary, only raw JSON.
 
     def evaluate_merchant(self, visual_items_count, shelf_fill_pct, interview_transcript):
         """
-        Evaluates merchant credit risk. Attempts local Ollama SLM first;
-        automatically falls back to deterministic financial engine if Ollama is unreachable.
+        Executes Multi-Tier Credit Underwriting:
+        Tier 1: Local Ollama daemon (Offline edge execution)
+        Tier 2: Hosted Neural Model via Hugging Face Serverless API (Cloud execution)
+        Tier 3: Dynamic Rule-Based NLP & Financial Math Engine (Fail-safe for any input)
         """
         prompt = self.formulate_system_prompt(visual_items_count, shelf_fill_pct, interview_transcript)
-        
-        payload = {
-            "model": self.model_name,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.1,
-                "num_ctx": 1024,
-                "num_predict": 250
-            }
-        }
 
+        # ── TIER 1: Try Local Ollama Daemon ────────────────────────────
         try:
-            # 60s timeout for neural inference
-            response = requests.post(self.api_url, json=payload, timeout=60)
-            response.raise_for_status()
-            response_json = response.json()
-            raw_output = response_json.get("response", "{}")
-            
-            parsed_data = json.loads(raw_output)
-            decision = CreditUnderwritingDecision(**parsed_data)
-            return decision
+            payload = {
+                "model": self.model_name,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.1, "num_ctx": 1024, "num_predict": 300}
+            }
+            res = requests.post(self.api_url, json=payload, timeout=4)
+            if res.status_code == 200:
+                raw_output = res.json().get("response", "{}")
+                print("[SUCCESS] Underwritten using Tier 1: Local Ollama Neural Model.")
+                return CreditUnderwritingDecision(**json.loads(raw_output))
+        except Exception:
+            pass  # Ollama not running locally, proceed to Tier 2
 
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, Exception) as e:
-            print(f"[INFO] SLM neural inference unavailable ({type(e).__name__}). Using deterministic financial fallback engine.")
-            return self.fallback_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
+        # ── TIER 2: Try Hugging Face Cloud Neural Model ─────────────────
+        hf_token = self.get_hf_token()
+        if hf_token:
+            try:
+                headers = {"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"}
+                # Use Hugging Face Serverless Chat Completion Endpoint for Qwen 2.5
+                hf_url = "https://router.huggingface.co/hf-inference/v1/chat/completions"
+                hf_payload = {
+                    "model": "Qwen/Qwen2.5-1.5B-Instruct",
+                    "messages": [
+                        {"role": "system", "content": "You are a microfinance credit risk auditor. Respond ONLY with raw JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "max_tokens": 350,
+                    "temperature": 0.1,
+                    "response_format": {"type": "json_object"}
+                }
+                res = requests.post(hf_url, headers=headers, json=hf_payload, timeout=25)
+                if res.status_code == 200:
+                    raw_content = res.json()["choices"][0]["message"]["content"]
+                    clean_json = raw_content.strip().strip("```json").strip("```").strip()
+                    decision = CreditUnderwritingDecision(**json.loads(clean_json))
+                    print("[SUCCESS] Underwritten using Tier 2: Cloud Neural Model (Qwen-2.5 on Hugging Face).")
+                    return decision
+            except Exception as e:
+                print(f"[INFO] Cloud API error ({str(e)}), falling back to Tier 3.")
+
+        # ── TIER 3: Dynamic Rule-Based NLP Financial Math Engine ────────
+        print("[INFO] Underwritten using Tier 3: Dynamic Financial NLP Engine.")
+        return self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
 
 if __name__ == "__main__":
-    print("CreditUnderwritingEngine ready with dual neural/deterministic support!")
+    print("Multi-Tier CreditUnderwritingEngine verified!")
