@@ -166,7 +166,12 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
                 print("[SUCCESS] Underwritten using Tier 2: Cloud Neural Model (Qwen-2.5 on Hugging Face).")
                 return decision
             except Exception as e:
-                print(f"[INFO] Cloud API note ({str(e)}), using calibrated Tier 3 engine.")
+                    cloud_error = f"HuggingFace API Error: {type(e).__name__} - {str(e)}"
+                    print(f"[ERROR] {cloud_error}")
+                    # Run fallback, but stamp the exact error on the decision rationale so you can see it!
+                    decision = self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
+                    decision.underwriting_rationale = f"[{cloud_error}] " + decision.underwriting_rationale
+                    return decision
 
         # ── TIER 3: Calibrated Financial NLP Engine ─────────────────────
         print("[INFO] Underwritten using Tier 3: Calibrated Financial Engine.")
