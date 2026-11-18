@@ -1,6 +1,7 @@
 """
 Central Pipeline Orchestrator for Micro-Merchant Credit Assessment Engine.
-Integrates Vision (ONNX YOLOv8), Voice (Whisper.cpp), and SLM Underwriting (Qwen-2.5 via Ollama).
+Integrates Vision (ONNX YOLOv8), Voice (Whisper.cpp), and SLM Underwriting (Qwen-2.5 / Groq).
+Hardened for video failure recovery, zero-item detection, and audio edge cases.
 """
 import os
 import sys
@@ -21,7 +22,7 @@ class CreditAuditPipeline:
     def __init__(self, 
                  onnx_model_path="models/best.onnx",
                  whisper_size="tiny",
-                 slm_model="qwen2.5:1.5b"):
+                 slm_model="allam-2-7b"):
         print("Initializing Multi-Modal Credit Audit Pipeline...")
         self.vision_engine = ShelfInventoryAuditor(onnx_model_path=onnx_model_path)
         self.voice_engine = VoiceInterviewTranscriber(model_size=whisper_size, compute_type="int8")
@@ -36,7 +37,7 @@ class CreditAuditPipeline:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if total_frames <= 0:
             cap.release()
-            raise ValueError(f"Invalid or corrupted video file: {video_path}")
+            raise ValueError(f"Invalid or unreadable video file: {video_path}")
 
         frame_indices = np.linspace(int(total_frames * 0.15), int(total_frames * 0.85), num_samples, dtype=int)
         frames = []
@@ -48,12 +49,18 @@ class CreditAuditPipeline:
                 frames.append(frame)
 
         cap.release()
+        if not frames:
+            raise ValueError("Could not extract any valid video frames from file.")
         return frames
 
     def annotate_frame(self, bgr_image, conf_threshold=0.25):
         """
         Draws green semi-transparent bounding boxes around detected shelf items using NMS.
         """
+        if bgr_image is None or bgr_image.size == 0:
+            # Fallback black canvas
+            bgr_image = np.zeros((640, 640, 3), dtype=np.uint8)
+
         tensor, (orig_h, orig_w) = self.vision_engine.preprocess(bgr_image)
         outputs = self.vision_engine.session.run(None, {self.vision_engine.input_name: tensor})
         preds = np.squeeze(outputs[0]).T
@@ -63,12 +70,12 @@ class CreditAuditPipeline:
         scale_y = orig_h / 640.0
 
         for pred in preds:
-            conf = float(pred[4])  # Corrected: Index 4 is confidence
+            conf = float(pred[4])
             if conf >= conf_threshold:
-                cx = float(pred[0])  # Index 0 is center X
-                cy = float(pred[1])  # Index 1 is center Y
-                w = float(pred[2])   # Index 2 is width
-                h = float(pred[3])   # Index 3 is height
+                cx = float(pred[0])
+                cy = float(pred[1])
+                w = float(pred[2])
+                h = float(pred[3])
 
                 x1 = int((cx - (w / 2.0)) * scale_x)
                 y1 = int((cy - (h / 2.0)) * scale_y)

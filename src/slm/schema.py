@@ -2,7 +2,7 @@
 Pydantic Data Schemas for Micro-Merchant Informal Credit Assessment.
 Defines the strictly enforced, resilient JSON schema for the SLM Underwriting Engine.
 """
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 class FinancialAnalysis(BaseModel):
@@ -32,7 +32,7 @@ class FinancialAnalysis(BaseModel):
         if isinstance(v, (int, float)):
             return float(v)
         if isinstance(v, str):
-            clean = v.replace('₹', '').replace(',', '').replace('Rs', '').replace('rupees', '').strip()
+            clean = v.replace('₹', '').replace(',', '').replace('Rs', '').replace('rupees', '').replace('रुपये', '').strip()
             try:
                 return float(clean)
             except ValueError:
@@ -43,11 +43,11 @@ class FinancialAnalysis(BaseModel):
     @classmethod
     def parse_ratio_string(cls, v):
         if isinstance(v, (int, float)):
-            if float(v) > 4.0 or float(v) < 1.0:
+            val = float(v)
+            if val > 4.0 or val < 0.6:
                 return "Severe Discrepancy"
             return "Aligned"
         return str(v)
-
 
 class CreditUnderwritingDecision(BaseModel):
     model_config = ConfigDict(extra="allow")
