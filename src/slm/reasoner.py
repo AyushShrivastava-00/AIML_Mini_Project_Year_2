@@ -41,7 +41,6 @@ class CreditUnderwritingEngine:
         return 2000.0
 
     def formulate_system_prompt(self, visual_items_count, shelf_fill_pct, interview_transcript):
-        # 1. Pre-calculate exact symbolic numbers in Python
         daily_sales = self.extract_stated_revenue(interview_transcript)
         monthly_sales = daily_sales * 30.0
         benchmark_unit_value = 50.0
@@ -49,40 +48,46 @@ class CreditUnderwritingEngine:
         monthly_cogs = monthly_sales * 0.80
         turnover_rate = round(monthly_cogs / max(eiv * 4.0, 1.0), 2)
 
-        prompt = f"""You are an expert microfinance credit risk officer assessing an informal retail merchant.
+        prompt = f"""You are a strict forensic microfinance credit auditor investigating informal merchants.
 
-REAL AUDIT TELEMETRY (PRE-CALCULATED):
+AUDIT TELEMETRY:
 - Merchant Interview: "{interview_transcript}"
-- Detected Physical Shelf Items: {visual_items_count}
-- Shelf Fill Percentage: {shelf_fill_pct:.1f}%
+- Detected Shelf Items: {visual_items_count}
+- Shelf Fill: {shelf_fill_pct:.1f}%
 - Estimated Inventory Value (EIV): {eiv:.0f} INR
 - Stated Daily Revenue: {daily_sales:.0f} INR
-- Calculated Monthly Revenue: {monthly_sales:.0f} INR
-- Calculated Inventory Turnover Rate: {turnover_rate:.2f}x per month
+- Stated Monthly Revenue: {monthly_sales:.0f} INR
+- Monthly Inventory Turnover Rate: {turnover_rate:.2f}x
 
-FINANCIAL UNDERWRITING RULES:
-1. Extract the merchant's name from the interview (e.g. Ramesh Kumar, Anita Verma, Vikram Singh). If unknown, use "Informal Merchant".
-2. Assess Risk based on telemetry:
-   - If {visual_items_count} < 20 items AND daily sales > 5000 INR: Flag SEVERE FRAUD/INFLATION! Score: 350-450, Risk: "Severe", Loan Limit: Capped at 5000 INR.
-   - If {visual_items_count} < 25 items AND daily sales <= 2000 INR (e.g. small tea/snack kiosk): Score: 620-660, Risk: "Moderate", Loan Limit: 10000-15000 INR.
-   - If {visual_items_count} >= 30 items AND daily sales match inventory: Score: 720-780, Risk: "Low", Loan Limit: 30000-45000 INR.
-3. Use the calculated numbers provided above in your response.
+CRITICAL UNDERWRITING LAWS (FOLLOW STRICTLY):
+1. Normal grocery inventory turnover is 1.5x to 3.0x per month.
+2. IF Turnover Rate > 4.0x OR ({visual_items_count} < 25 items AND daily sales > 5000 INR):
+   - This is SEVERE REVENUE INFLATION / FRAUD! A merchant cannot sell 200x their visible stock.
+   - You MUST assign:
+     "risk_tier": "Severe",
+     "credit_score": an integer between 350 and 420 (NEVER above 450),
+     "recommended_loan_limit": 2500.0 (NEVER above 5000),
+     "inventory_to_sales_ratio": "Severe Discrepancy",
+     "discrepancy_flags": ["Severe turnover discrepancy", "Claimed sales mathematically incompatible with stock"]
+3. IF Turnover Rate is between 1.5x and 3.5x AND {visual_items_count} >= 30 items:
+   - This is a healthy, verified merchant.
+   - Assign: "risk_tier": "Low", "credit_score": 720 to 760, "recommended_loan_limit": 35000.0 to 45000.0.
 
 OUTPUT REQUIREMENT:
-Respond ONLY with a single JSON object. Use the exact keys below:
+Respond ONLY with a single JSON object. Do not include markdown codeblocks or commentary:
 {{
   "merchant_name": "<extracted full name>",
-  "credit_score": <calculated integer between 300 and 850>,
-  "risk_tier": "<Low, Moderate, High, or Severe>",
-  "recommended_loan_limit": <calculated float>,
+  "credit_score": <integer>,
+  "risk_tier": "<Low or Severe>",
+  "recommended_loan_limit": <float>,
   "confidence_score": 0.88,
-  "discrepancy_flags": ["<flag any mismatch, or empty if aligned>"],
-  "underwriting_rationale": "<2 sentences explaining why the loan was approved, moderated, or denied based on the specific telemetry above>",
+  "discrepancy_flags": ["<flags>"],
+  "underwriting_rationale": "<2 sentences stating if revenue reconciles or if severe turnover inflation was detected>",
   "financial_metrics": {{
     "estimated_daily_revenue": {daily_sales:.1f},
     "estimated_monthly_revenue": {monthly_sales:.1f},
     "inventory_turnover_rate": {turnover_rate:.2f},
-    "inventory_to_sales_ratio": "<Aligned, Slightly Inflated, or Severe Discrepancy>"
+    "inventory_to_sales_ratio": "<Aligned or Severe Discrepancy>"
   }}
 }}
 """
