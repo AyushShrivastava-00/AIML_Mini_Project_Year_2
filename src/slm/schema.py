@@ -2,10 +2,12 @@
 Pydantic Data Schemas for Micro-Merchant Informal Credit Assessment.
 Defines the strictly enforced, resilient JSON schema for the SLM Underwriting Engine.
 """
-from typing import List, Union
-from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 class FinancialAnalysis(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    
     estimated_daily_revenue: float = Field(default=0.0, description="Estimated daily revenue in local currency")
     estimated_monthly_revenue: float = Field(default=0.0, description="Estimated 30-day gross revenue")
     inventory_turnover_rate: float = Field(default=2.0, description="Calculated monthly inventory turnover ratio number")
@@ -14,7 +16,6 @@ class FinancialAnalysis(BaseModel):
     @field_validator('inventory_turnover_rate', mode='before')
     @classmethod
     def parse_turnover(cls, v):
-        """Coerces strings to float if model returns text like '2.5x' or swaps fields."""
         if isinstance(v, (int, float)):
             return float(v)
         if isinstance(v, str):
@@ -22,7 +23,7 @@ class FinancialAnalysis(BaseModel):
             try:
                 return float(clean)
             except ValueError:
-                return 2.0  # safe default fallback
+                return 2.0
         return 2.0
 
     @field_validator('estimated_daily_revenue', 'estimated_monthly_revenue', mode='before')
@@ -39,6 +40,8 @@ class FinancialAnalysis(BaseModel):
         return 0.0
 
 class CreditUnderwritingDecision(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     merchant_name: str = Field(default="Informal Merchant", description="Name of the merchant")
     credit_score: int = Field(default=600, ge=300, le=850, description="Credit score between 300 and 850")
     risk_tier: str = Field(default="Moderate", description="Risk Classification: 'Low', 'Moderate', 'High', or 'Severe'")
@@ -47,6 +50,7 @@ class CreditUnderwritingDecision(BaseModel):
     discrepancy_flags: List[str] = Field(default_factory=list, description="List of identified fraud or mismatch flags")
     underwriting_rationale: str = Field(default="", description="Detailed explanation of credit decision")
     financial_metrics: FinancialAnalysis
+    engine_source: Optional[str] = Field(default="Multi-Tier AI Underwriting Engine", description="Source engine used for decision")
 
     @field_validator('credit_score', mode='before')
     @classmethod

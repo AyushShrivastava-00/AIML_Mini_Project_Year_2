@@ -174,7 +174,7 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
             if res.status_code == 200:
                 raw_output = res.json().get("response", "{}")
                 decision = CreditUnderwritingDecision(**json.loads(raw_output))
-                setattr(decision, "engine_source", "Tier 1: Local Edge SLM (Ollama Qwen-2.5-1.5B)")
+                decision.engine_source = "Tier 1: Local Edge SLM (Ollama Qwen-2.5-1.5B)"
                 print("[SUCCESS] Underwritten using Tier 1: Local Ollama Model.")
                 return decision
         except Exception:
@@ -200,7 +200,7 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
                     raw_content = response.choices[0].message.content
                     clean_json = raw_content.strip().strip("```json").strip("```").strip()
                     decision = CreditUnderwritingDecision(**json.loads(clean_json))
-                    setattr(decision, "engine_source", f"Tier 2: Cloud Neural Model ({candidate})")
+                    decision.engine_source = f"Tier 2: Cloud Neural Model ({candidate})"
                     print(f"[SUCCESS] Underwritten using Tier 2: Cloud Neural Model ({candidate}).")
                     return decision
                 except Exception as e:
@@ -208,6 +208,7 @@ Return ONLY raw JSON. No markdown code blocks, no commentary."""
                     continue
 
         # ── TIER 3: Calibrated Financial NLP Engine ─────────────────────
+        decision.engine_source = "Tier 3: Calibrated Deterministic Rule Engine"
         print("[INFO] Underwritten using Tier 3: Calibrated Financial Engine.")
         return self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
 
