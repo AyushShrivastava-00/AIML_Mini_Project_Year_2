@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 class FinancialAnalysis(BaseModel):
     model_config = ConfigDict(extra="allow")
-    
+
     estimated_daily_revenue: float = Field(default=0.0, description="Estimated daily revenue in local currency")
     estimated_monthly_revenue: float = Field(default=0.0, description="Estimated 30-day gross revenue")
     inventory_turnover_rate: float = Field(default=2.0, description="Calculated monthly inventory turnover ratio number")
@@ -38,6 +38,16 @@ class FinancialAnalysis(BaseModel):
             except ValueError:
                 return 0.0
         return 0.0
+
+    @field_validator('inventory_to_sales_ratio', mode='before')
+    @classmethod
+    def parse_ratio_string(cls, v):
+        if isinstance(v, (int, float)):
+            if float(v) > 4.0 or float(v) < 1.0:
+                return "Severe Discrepancy"
+            return "Aligned"
+        return str(v)
+
 
 class CreditUnderwritingDecision(BaseModel):
     model_config = ConfigDict(extra="allow")
