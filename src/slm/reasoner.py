@@ -1,8 +1,8 @@
 """
 Multi-Tier Underwriting Engine:
-1. Local Ollama (when running offline on local machine)
-2. Groq Cloud LPU Engine with Dynamic Model Detection (Fast, Free, Zero-Cold-Start)
-3. Dynamic Financial NLP Engine (Fail-safe for any merchant)
+Tier 1: Local Ollama (offline edge laptop)
+Tier 2: Hosted Neural Model via Groq Cloud (allam-2-7b / Llama)
+Tier 3: Dynamic Financial NLP Engine (Fail-safe for any merchant)
 """
 import os
 import re
@@ -71,13 +71,11 @@ Respond ONLY with a single valid JSON object matching this schema:
 
     def dynamic_rule_engine(self, visual_items_count, shelf_fill_pct, interview_transcript):
         """
-        Generalized Dynamic Financial NLP Engine.
-        Calibrated to standard Indian FMCG retail benchmarks.
+        Generalized Dynamic Financial NLP Engine (Fallback).
         """
         text = interview_transcript.strip()
         text_lower = text.lower()
 
-        # 1. Dynamic Name Extraction
         merchant_name = "Informal Merchant"
         name_match = re.search(r"(?:name is|i am|this is)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)", text, re.IGNORECASE)
         if name_match:
@@ -89,7 +87,6 @@ Respond ONLY with a single valid JSON object matching this schema:
         elif "ramesh" in text_lower or "kumar" in text_lower:
             merchant_name = "Ramesh Kumar"
 
-        # 2. Dynamic Daily Revenue Extraction (prioritizes "daily sales" over supplier costs)
         daily_revenue = 2500.0
         rev_match = re.search(r"(?:daily sales|daily turnover|daily revenue|earn daily|sales per day)\s*(?:are|is|around|of)?\s*(?:rs\.?|rupees|inr)?\s*([0-9]+(?:,[0-9]+)?)", text_lower)
         if rev_match:
@@ -104,7 +101,7 @@ Respond ONLY with a single valid JSON object matching this schema:
             daily_revenue = 20000.0
 
         monthly_revenue = daily_revenue * 30.0
-        benchmark_unit_value = 50.0  # ₹50 per typical grocery item
+        benchmark_unit_value = 50.0
         eiv = max(100.0, visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0))
         monthly_cogs = monthly_revenue * 0.80
         turnover_rate = monthly_cogs / max(eiv * 4.0, 1.0)
@@ -151,30 +148,6 @@ Respond ONLY with a single valid JSON object matching this schema:
             )
         )
 
-    def select_groq_model(self, client):
-        """
-        Dynamically discovers active chat models on the Groq account.
-        """
-        preferred = [
-            "llama-3.3-70b-versatile",
-            "llama3-8b-8192",
-            "llama3-70b-8192",
-            "gemma2-9b-it",
-            "mixtral-8x7b-32768"
-        ]
-        try:
-            available = [m.id for m in client.models.list().data]
-            for p in preferred:
-                if p in available:
-                    return p
-            # If preferred models aren't found, pick the first available chat model
-            for m in available:
-                if "llama" in m or "gemma" in m or "mixtral" in m:
-                    return m
-            return available[0] if available else "llama-3.3-70b-versatile"
-        except Exception:
-            return "llama-3.3-70b-versatile"
-
     def evaluate_merchant(self, visual_items_count, shelf_fill_pct, interview_transcript):
         prompt = self.formulate_system_prompt(visual_items_count, shelf_fill_pct, interview_transcript)
 
@@ -197,51 +170,44 @@ Respond ONLY with a single valid JSON object matching this schema:
         except Exception:
             pass
 
-            # ── TIER 2: Groq Cloud LPU Engine ──────────────────────────────
-                # ── TIER 2: Groq Cloud LPU Neural Engine ────────────────────────
+        # ── TIER 2: Groq Cloud LPU Neural Engine ────────────────────────
         groq_key = self.get_groq_key()
         if groq_key:
             try:
                 from groq import Groq
                 client = Groq(api_key=groq_key)
                 
-                # Filter strictly for generative models (exclude prompt-guard classifiers and whisper audio models)
-                all_models = [m.id for m in client.models.list().data if "prompt-guard" not in m.id and "whisper" not in m.id]
+                # Directly prioritize allam-2-7b which works on your account
+                target_models = ["allam-2-7b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
                 
-                preferred_order = [
-                    "llama-3.3-70b-versatile",
-                    "llama-3.1-8b-instant",
-                    "llama3-8b-8192",
-                    "mixtral-8x7b-32768",
-                    "gemma2-9b-it"
-                ]
+                raw_content = None
+                model_used = None
                 
-                target_model = None
-                for p in preferred_order:
-                    if p in all_models:
-                        target_model = p
+                for candidate in target_models:
+                    try:
+                        chat_completion = client.chat.completions.create(
+                            messages=[
+                                {"role": "system", "content": "You are a professional microfinance credit risk auditor. Output strictly a single raw JSON object matching the requested schema. No code blocks, no introductory text."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            model=candidate,
+                            temperature=0.1,
+                            max_tokens=400
+                        )
+                        raw_content = chat_completion.choices[0].message.content
+                        model_used = candidate
                         break
-                if not target_model:
-                    target_model = all_models[0] if all_models else "llama-3.3-70b-versatile"
+                    except Exception:
+                        continue
 
-                chat_completion = client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "You are a professional microfinance credit risk auditor. Output strictly a single raw JSON object matching the requested schema. No code blocks, no introductory text."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    model=target_model,
-                    temperature=0.1,
-                    max_tokens=400
-                )
-                
-                raw_content = chat_completion.choices[0].message.content
-                clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
-                json_str = clean_match.group(0) if clean_match else raw_content.strip()
-                
-                decision = CreditUnderwritingDecision(**json.loads(json_str))
-                decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine ({target_model})] " + decision.underwriting_rationale
-                print(f"[SUCCESS] Underwritten via Groq ({target_model})")
-                return decision
+                if raw_content:
+                    clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                    json_str = clean_match.group(0) if clean_match else raw_content.strip()
+                    
+                    decision = CreditUnderwritingDecision(**json.loads(json_str))
+                    decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine ({model_used})] " + decision.underwriting_rationale
+                    print(f"[SUCCESS] Underwritten via Groq ({model_used})")
+                    return decision
 
             except Exception as e:
                 err_msg = f"Groq Error: {type(e).__name__} - {str(e)}"
@@ -250,6 +216,8 @@ Respond ONLY with a single valid JSON object matching this schema:
                 fallback_decision.underwriting_rationale = f"[{err_msg}] " + fallback_decision.underwriting_rationale
                 return fallback_decision
 
-
         # ── TIER 3: Dynamic Financial NLP Engine ────────────────────────
         return self.dynamic_rule_engine(visual_items_count, shelf_fill_pct, interview_transcript)
+
+if __name__ == "__main__":
+    print("CreditUnderwritingEngine ready!")
