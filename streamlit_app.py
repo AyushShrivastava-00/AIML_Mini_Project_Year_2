@@ -134,3 +134,13 @@ with col_output:
                 finally:
                     if os.path.exists(tmp_img_path): os.remove(tmp_img_path)
                     if os.path.exists(tmp_audio_path): os.remove(tmp_audio_path)
+# ── ONE-CLICK EXPORTABLE AUDIT REPORT ──────────────────────
+report_json = decision.model_dump_json(indent=2)
+st.download_button(
+    label="📥 Download Formal Credit Audit Report (JSON)",
+    data=report_json,
+    file_name=f"credit_audit_{decision.merchant_name.replace(' ', '_').lower()}.json",
+    mime="application/json",
+    use_container_width=True
+)
+                    # ───────────────────────────────────────────────────────────
