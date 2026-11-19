@@ -1,5 +1,7 @@
 """
 Micro-Merchant Informal Credit Assessment Engine - Streamlit Cloud Web Application.
+Features OpenCV Vision sampling, Whisper STT, and Groq LPU Underwriting.
+Includes a dynamic, one-click exportable JSON audit report download.
 """
 import os
 import sys
@@ -36,7 +38,7 @@ def load_pipeline():
     return CreditAuditPipeline(
         onnx_model_path="models/best.onnx",
         whisper_size="tiny",
-        slm_model="qwen2.5:1.5b"
+        slm_model="allam-2-7b"
     )
 
 pipeline = load_pipeline()
@@ -129,18 +131,21 @@ with col_output:
                     </div>
                     """, unsafe_allow_html=True)
 
+                    # ── ONE-CLICK EXPORTABLE AUDIT REPORT ──────────────────────
+                    # This sits safely inside the try-block, making it render only upon success!
+                    st.write("")
+                    report_json = decision.model_dump_json(indent=2)
+                    st.download_button(
+                        label="📥 Download Formal Credit Audit Report (JSON)",
+                        data=report_json,
+                        file_name=f"credit_audit_{decision.merchant_name.replace(' ', '_').lower()}.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
+                    # ───────────────────────────────────────────────────────────
+
                 except Exception as e:
                     st.error(f"Error during audit evaluation: {str(e)}")
                 finally:
                     if os.path.exists(tmp_img_path): os.remove(tmp_img_path)
                     if os.path.exists(tmp_audio_path): os.remove(tmp_audio_path)
-# ── ONE-CLICK EXPORTABLE AUDIT REPORT ──────────────────────
-report_json = decision.model_dump_json(indent=2)
-st.download_button(
-    label="📥 Download Formal Credit Audit Report (JSON)",
-    data=report_json,
-    file_name=f"credit_audit_{decision.merchant_name.replace(' ', '_').lower()}.json",
-    mime="application/json",
-    use_container_width=True
-)
-                    # ───────────────────────────────────────────────────────────
