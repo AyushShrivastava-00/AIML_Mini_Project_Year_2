@@ -7,7 +7,7 @@ import sys
 import tempfile
 import textwrap
 import streamlit as st
-from src.pipeline.pdf_report import generate_pdf_credit_report
+from src.pipeline.pdf_generator import generate_pdf_credit_report
 
 
 # 1. Streamlit configuration MUST be the first Streamlit command
