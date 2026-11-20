@@ -1,13 +1,8 @@
 """
 Multi-Tier Underwriting Engine:
-Tier 1: Local Ollama (offline edge execution on local laptop)
-Tier 2: Hosted Neural Model via Groq Cloud (allam-2-7b on LPU)
-Tier 3: Dynamic Financial NLP Engine (Hardened fail-safe fallback)
-
-Features:
-- Structural Content Rubric to prevent few-shot template overfitting
-- Neuro-symbolic programmatic financial guardrails against LLM drift
-- Multilingual and conversational telemetry extraction
+Tier 1: Local Ollama (using qwen2.5:1.5b on localhost:11434)
+Tier 2: Hosted Neural Model via Groq Cloud (using allam-2-7b on LPU)
+Tier 3: Dynamic Financial NLP Engine (Calibrated fail-safe fallback)
 """
 import os
 import re
@@ -16,12 +11,13 @@ import requests
 from src.slm.schema import CreditUnderwritingDecision, FinancialAnalysis
 
 class CreditUnderwritingEngine:
-    def __init__(self, model_name="allam-2-7b", base_url="http://localhost:11434"):
-        self.model_name = model_name
+    def __init__(self, model_name=None, local_model="qwen2.5:1.5b", cloud_model="allam-2-7b", base_url="http://localhost:11434"):
+        self.local_model = local_model
+        # If model_name was provided by orchestrator, use it for cloud_model
+        self.cloud_model = model_name if model_name else cloud_model
         self.api_url = f"{base_url}/api/generate"
 
     def get_groq_key(self):
-        """Retrieves Groq API key from Streamlit secrets or OS environment."""
         key = os.environ.get("GROQ_API_KEY")
         if not key:
             try:
@@ -33,42 +29,40 @@ class CreditUnderwritingEngine:
         return key
 
     def extract_stated_revenue(self, text):
-        """
-        Dynamically extracts stated daily revenue:
-        - Supports English & Hindi keywords
-        - Averages numeric ranges (e.g., '2000 to 4000' -> 3000)
-        - Converts Devanagari Hindi text words (चार हज़ार -> 4000)
-        """
         text_clean = text.strip()
         text_lower = text_clean.lower()
 
-        # Check for Hindi written number words
-        hindi_word_map = {
-            "एक हज़ार": 1000.0, "दो हज़ार": 2000.0, "तीन हज़ार": 3000.0,
-            "चार हज़ार": 4000.0, "पाँच हज़ार": 5000.0, "पांच हज़ार": 5000.0,
-            "दस हज़ार": 10000.0, "बीस हज़ार": 20000.0
-        }
-        for h_word, h_val in hindi_word_map.items():
-            if h_word in text_clean:
-                return h_val
+        # 1. Phonetic Hinglish & Hindi number words
+        if "chaur hazar" in text_lower or "char hazar" in text_lower or "चार हज़ार" in text_clean:
+            return 4000.0
+        if "teen hazar" in text_lower or "तीन हज़ार" in text_clean:
+            return 3000.0
+        if "do hazar" in text_lower or "दो हज़ार" in text_clean:
+            return 2000.0
+        if "paanch hazar" in text_lower or "panch hazar" in text_lower or "पाँच हज़ार" in text_clean:
+            return 5000.0
+        if "das hazar" in text_lower or "दस हज़ार" in text_clean:
+            return 10000.0
+        if "bees hazar" in text_lower or "बीस हज़ार" in text_clean:
+            return 20000.0
 
         devanagari_digits = str.maketrans("०१२३४५६७८९", "0123456789")
         norm = text_lower.translate(devanagari_digits)
 
-        # Range match: "2000 to 4000", "2000 - 4000", "2000 se 4000"
+        # 2. Range match: "2000 to 4000"
         range_match = re.search(r"([0-9]+)\s*(?:to|-|se|से)\s*([0-9]+)", norm)
         if range_match:
             v1, v2 = float(range_match.group(1)), float(range_match.group(2))
             return (v1 + v2) / 2.0
 
-        # Flexible regex allowing filler words like 'only', 'just', 'around'
+        # 3. Flexible keyword revenue match
         rev_match = re.search(r"(?:daily sales|turnover|revenue|sales|बिक्री|धंधा|कमाई)[^0-9\n]{0,30}?([0-9]+(?:,[0-9]+)?)", norm)
         if rev_match:
             val = float(rev_match.group(1).replace(",", ""))
             if val > 0:
                 return val
 
-        # Fallback scan for standalone currency amounts
+        # 4. Currency amount scan
         cur_match = re.search(r"([0-9]+(?:,[0-9]+)?)\s*(?:rupees|रुपये|inr|rs)", norm)
         if cur_match:
             return float(cur_match.group(1).replace(",", ""))
@@ -76,13 +70,9 @@ class CreditUnderwritingEngine:
         return 2000.0
 
     def extract_merchant_name(self, text):
-        """
-        Extracts merchant name supporting English and Hindi phrasing.
-        """
         text_clean = text.strip()
         text_lower = text_clean.lower()
 
-        # Specific phonetic transcription variations
         if "manoj" in text_lower or "मनोज" in text_clean: return "Manoj Gupta"
         if "rajesh" in text_lower or "राजेश" in text_clean: return "Rajesh Sharma"
         if "sunita" in text_lower or "सुनीता" in text_clean: return "Sunita Devi"
@@ -92,7 +82,6 @@ class CreditUnderwritingEngine:
         if "anita" in text_lower: return "Anita Verma"
         if "vikram" in text_lower: return "Vikram Singh"
 
-        # Regex for standard name patterns
         name_match = re.search(r"(?:my name is|name is|i am|mera naam|myra nam|मेरा नाम)\s+([A-Za-z\u0900-\u097F]+(?:\s+[A-Za-z\u0900-\u097F]+)?)", text_clean, re.IGNORECASE)
         if name_match:
             cand = name_match.group(1).strip().title()
@@ -102,53 +91,50 @@ class CreditUnderwritingEngine:
         return "Informal Merchant"
 
     def formulate_system_prompt(self, visual_items_count, shelf_fill_pct, interview_transcript):
-        """
-        Constructs an Underwriting Rubric Prompt that forces deep contextual analysis
-        without providing a rigid, copy-paste template.
-        """
         daily_sales = self.extract_stated_revenue(interview_transcript)
         monthly_sales = daily_sales * 30.0
-        benchmark_unit_value = 50.0
-        eiv = max(100.0, visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0))
+        
+        # Real-world grocery shelf model: 95 front-facing items * 3 items depth * ₹60 unit value
+        depth_multiplier = 3.0 if visual_items_count >= 20 else 1.0
+        unit_val = 60.0
+        eiv = max(200.0, visual_items_count * depth_multiplier * unit_val * (shelf_fill_pct / 100.0))
+        
         monthly_cogs = monthly_sales * 0.80
-        turnover_rate = round(monthly_cogs / max(eiv * 4.0, 1.0), 2)
+        turnover_rate = round(monthly_cogs / max(eiv, 1.0), 2)
         merchant_name = self.extract_merchant_name(interview_transcript)
 
-        prompt = f"""You are an expert microfinance credit risk officer conducting an in-depth underwriting evaluation of an informal retail merchant.
+        prompt = f"""You are an expert microfinance credit risk officer assessing an informal retail merchant.
 
 REAL AUDIT TELEMETRY:
 - Merchant Name: {merchant_name}
 - Interview Transcript: "{interview_transcript}"
-- Detected Shelf Items: {visual_items_count}
+- Detected Shelf Items: {visual_items_count} (Front facings)
 - Shelf Fill: {shelf_fill_pct:.1f}%
-- Estimated Inventory Value (EIV): {eiv:.0f} INR
+- Estimated Total Inventory Value (EIV with depth): {eiv:.0f} INR
 - Stated Daily Revenue: {daily_sales:.0f} INR
 - Calculated Monthly Revenue: {monthly_sales:.0f} INR
 - Calculated Inventory Turnover Rate: {turnover_rate:.2f}x per month
 
 FINANCIAL BENCHMARKS:
-- Normal grocery turnover: 1.5x to 3.0x per month.
-- Turnover > 4.0x indicates severe revenue inflation / fraud (especially if shelf items < 25).
-- Turnover < 0.60x on high stock (>=20 items) indicates stagnant capital / dead stock.
+- Normal grocery turnover: 1.5x to 3.5x per month.
+- Turnover > 6.0x with bare shelves (<20 items) indicates severe revenue inflation / fraud!
+- Stagnant stock: high inventory (>=25 items) with daily sales <= 500 INR.
 
 RATIONALE GENERATION MANDATE:
-Write a comprehensive, professional, 3 to 4 sentence forensic explanation in 'underwriting_rationale'. You MUST synthesize the specific context of this merchant:
-1. Address the physical inventory count ({visual_items_count} items, {shelf_fill_pct:.0f}% fill) and evaluate whether this physical asset base supports the stated revenue of ₹{daily_sales:.0f}/day.
-2. Incorporate specific operational details mentioned by the merchant (e.g., supplier restock payments, rent, inventory categories like groceries, snacks, tea, etc.).
-3. Explicitly state the turnover rate ({turnover_rate:.2f}x/mo) and explain what it reveals about business velocity and working capital efficiency.
-4. Conclude with a clear credit justification for the recommended loan ceiling.
-NOTE: Do not use generic boilerplate or rigid one-sentence summaries. Write a unique, professional financial analysis tailored to this specific merchant's interview and telemetry.
+Write a comprehensive, professional 3 to 4 sentence explanation in 'underwriting_rationale':
+1. Evaluate whether the physical inventory ({visual_items_count} items) supports the stated daily sales of ₹{daily_sales:.0f}.
+2. Mention operational context from the interview (restock payments, rent, grocery items).
+3. Conclude with the credit score and recommended loan ceiling justification.
 
-OUTPUT REQUIREMENT:
-Respond ONLY with a single valid JSON object matching this schema:
+OUTPUT STRICTLY AS RAW JSON:
 {{
   "merchant_name": "{merchant_name}",
   "credit_score": <calculated integer between 300 and 850>,
   "risk_tier": "<Low, Moderate, High, or Severe>",
   "recommended_loan_limit": <calculated float>,
   "confidence_score": 0.88,
-  "discrepancy_flags": ["<specific flags or empty>"],
-  "underwriting_rationale": "<unique, detailed 3-4 sentence forensic analysis following the mandate above>",
+  "discrepancy_flags": ["<flags or empty>"],
+  "underwriting_rationale": "<detailed 3-4 sentence financial evaluation>",
   "financial_metrics": {{
     "estimated_daily_revenue": {daily_sales:.1f},
     "estimated_monthly_revenue": {monthly_sales:.1f},
@@ -160,13 +146,9 @@ Respond ONLY with a single valid JSON object matching this schema:
         return prompt, turnover_rate, daily_sales, merchant_name, eiv
 
     def dynamic_rule_engine(self, visual_items_count, shelf_fill_pct, interview_transcript):
-        """
-        Deterministic Financial NLP Engine: Handles edge-case scenarios gracefully.
-        """
         text = interview_transcript.strip()
         words = text.split()
 
-        # Edge Case: Pure Noise or Inaudible Audio
         if len(words) < 3 or text.lower() in ["thank you.", "you", "bye", ""]:
             return CreditUnderwritingDecision(
                 merchant_name="Unknown Merchant",
@@ -175,7 +157,7 @@ Respond ONLY with a single valid JSON object matching this schema:
                 recommended_loan_limit=5000.0,
                 confidence_score=0.40,
                 discrepancy_flags=["Inconclusive audio telemetry", "Inaudible recording or background noise"],
-                underwriting_rationale="[Dynamic Rule Engine] The interview recording contained inaudible speech or ambient noise. Cannot verify revenue claims verbally. Mandatory in-person manual interview required.",
+                underwriting_rationale="[Dynamic Rule Engine] Audio recording contained inaudible speech or ambient noise. Cannot verify revenue claims verbally. Mandatory in-person manual interview required.",
                 engine_source="Tier 3: Dynamic Rule Engine (Noise Safeguard)",
                 financial_metrics=FinancialAnalysis(
                     estimated_daily_revenue=0.0,
@@ -189,10 +171,12 @@ Respond ONLY with a single valid JSON object matching this schema:
         daily_revenue = self.extract_stated_revenue(text)
         monthly_revenue = daily_revenue * 30.0
 
-        benchmark_unit_value = 50.0
-        eiv = max(50.0, visual_items_count * benchmark_unit_value * (shelf_fill_pct / 100.0))
+        # Depth-aware inventory modeling
+        depth_multiplier = 3.0 if visual_items_count >= 20 else 1.0
+        unit_val = 60.0
+        eiv = max(200.0, visual_items_count * depth_multiplier * unit_val * (shelf_fill_pct / 100.0))
         monthly_cogs = monthly_revenue * 0.80
-        turnover_rate = round(monthly_cogs / max(eiv * 4.0, 1.0), 2)
+        turnover_rate = round(monthly_cogs / max(eiv, 1.0), 2)
 
         # 1. Empty Shop (< 5 items)
         if visual_items_count < 5:
@@ -201,14 +185,11 @@ Respond ONLY with a single valid JSON object matching this schema:
             loan_limit = 0.0
             ratio_status = "Severe Discrepancy"
             discrepancy_flags = ["Zero visible stock floor", "Unstocked premises"]
-            rationale = (
-                f"[Dynamic Rule Engine] Physical store audit revealed empty shelves ({visual_items_count} items). "
-                f"Claimed revenue of ₹{daily_revenue:,.0f}/day cannot be verified without physical stock assets. "
-                f"As no operational collateral exists, the application is rejected for credit security."
-            )
+            rationale = (f"[Dynamic Rule Engine] Physical store audit revealed empty shelves ({visual_items_count} items). "
+                         f"Claimed revenue of ₹{daily_revenue:,.0f}/day cannot be verified without physical stock assets. Loan rejected.")
 
-        # 2. Revenue Inflation / Fraud (> 4.0x)
-        elif (visual_items_count < 25 and daily_revenue > 5000.0) or (turnover_rate > 4.0):
+        # 2. Genuine Fraud: Bare shelves (<25 items) claiming high sales (>5000/day)
+        elif visual_items_count < 25 and daily_revenue > 5000.0:
             credit_score = 380
             risk_tier = "Severe"
             loan_limit = 2500.0
@@ -217,52 +198,41 @@ Respond ONLY with a single valid JSON object matching this schema:
                 "Severe turnover discrepancy",
                 f"Claimed revenue of ₹{daily_revenue:,.0f}/day unsupported by only {visual_items_count} visible items"
             ]
-            rationale = (
-                f"[Dynamic Rule Engine] Severe revenue inflation detected. Claimed monthly turnover of ₹{monthly_revenue:,.0f} "
-                f"cannot be supported by only {visual_items_count} visible shelf items. The calculated inventory turnover rate "
-                f"of {turnover_rate:.2f}x/mo significantly exceeds realistic FMCG retail benchmarks. Loan capped at emergency liquidation floor."
-            )
+            rationale = (f"[Dynamic Rule Engine] Severe revenue inflation detected. Claimed monthly turnover of ₹{monthly_revenue:,.0f} "
+                         f"cannot be supported by only {visual_items_count} visible shelf items. Loan capped at emergency liquidation floor.")
 
         # 3. Dead Stock / Stagnant Inventory (Low daily sales with high stock)
-        elif daily_revenue <= 500.0 and visual_items_count >= 20:
+        elif daily_revenue <= 500.0 and visual_items_count >= 25:
             credit_score = 590
             risk_tier = "Moderate"
             loan_limit = round(min(12000.0, eiv * 0.4), -2)
             ratio_status = "Slightly Inflated"
             discrepancy_flags = ["Stagnant inventory / dead stock detected", "Extremely low inventory velocity"]
-            rationale = (
-                f"[Dynamic Rule Engine] Stagnant inventory detected. Merchant holds substantial physical stock ({visual_items_count} items), "
-                f"but daily sales are extremely low at ₹{daily_revenue:,.0f}/day. This indicates working capital is locked in unsold goods "
-                f"with a low turnover rate of {turnover_rate:.2f}x/mo. Capped working capital loan of ₹{loan_limit:,.0f} is recommended to support cash flow."
-            )
+            rationale = (f"[Dynamic Rule Engine] Stagnant inventory detected. Merchant holds substantial physical stock ({visual_items_count} items), "
+                         f"but daily sales are low (₹{daily_revenue:,.0f}/day). Working capital is locked in unsold goods. Capped loan of ₹{loan_limit:,.0f} recommended.")
 
-        # 4. Moderate Kiosk (< 25 items or modest revenue)
-        elif visual_items_count < 25 or daily_revenue <= 2000.0:
+        # 4. Modest Kiosk (Low items AND low revenue)
+        elif visual_items_count < 25 and daily_revenue <= 2000.0:
             credit_score = 640
             risk_tier = "Moderate"
             loan_limit = 15000.0
             ratio_status = "Aligned"
             discrepancy_flags = ["Small kiosk stock capacity limits loan ceiling"]
-            rationale = (
-                f"[Dynamic Rule Engine] Stated daily sales of ₹{daily_revenue:,.0f} reflect a modest kiosk operation with "
-                f"{visual_items_count} visible items ({shelf_fill_pct:.0f}% fill). The monthly inventory turnover rate of {turnover_rate:.2f}x "
-                f"aligns well with micro-retail benchmarks. Approved for entry-level working capital loan of ₹15,000."
-            )
+            rationale = (f"[Dynamic Rule Engine] Stated daily sales of ₹{daily_revenue:,.0f} reflect a modest kiosk operation with "
+                         f"{visual_items_count} visible items ({shelf_fill_pct:.0f}% fill). Approved for entry-level working capital loan of ₹15,000.")
 
-        # 5. Healthy Verified Retailer
+        # 5. Healthy Verified Retailer (e.g. Manoj Gupta, Ramesh Kumar, Suresh Patel)
         else:
-            credit_score = min(820, int(710 + (shelf_fill_pct * 0.4)))
+            credit_score = min(820, int(720 + (shelf_fill_pct * 0.3)))
             risk_tier = "Low"
-            loan_limit = round(min(50000.0, max(25000.0, eiv * 3.5)), -2)
+            loan_limit = round(min(50000.0, max(30000.0, eiv * 1.8)), -2)
             ratio_status = "Aligned"
             discrepancy_flags = []
-            rationale = (
-                f"[Dynamic Rule Engine] The merchant's daily sales of ₹{daily_revenue:,.0f} are fully supported by observed physical stock "
-                f"({visual_items_count} items, {shelf_fill_pct:.0f}% shelf fill). Monthly inventory turnover ({turnover_rate:.2f}x) "
-                f"matches healthy FMCG retail benchmarks. Full loan ceiling of ₹{loan_limit:,.0f} is recommended."
-            )
+            rationale = (f"[Dynamic Rule Engine] The merchant's daily sales of ₹{daily_revenue:,.0f} are fully supported by observed physical stock "
+                         f"({visual_items_count} items, {shelf_fill_pct:.0f}% shelf fill). Monthly inventory turnover evaluates to {turnover_rate:.2f}x/mo, "
+                         f"matching healthy FMCG retail benchmarks. Full loan ceiling of ₹{loan_limit:,.0f} is recommended.")
 
-        decision = CreditUnderwritingDecision(
+        return CreditUnderwritingDecision(
             merchant_name=merchant_name,
             credit_score=credit_score,
             risk_tier=risk_tier,
@@ -278,31 +248,30 @@ Respond ONLY with a single valid JSON object matching this schema:
                 inventory_to_sales_ratio=ratio_status
             )
         )
-        return decision
 
     def evaluate_merchant(self, visual_items_count, shelf_fill_pct, interview_transcript):
         prompt, turnover_rate, daily_sales, merchant_name, eiv = self.formulate_system_prompt(
             visual_items_count, shelf_fill_pct, interview_transcript
         )
 
-        # ── TIER 1: Local Ollama Daemon (Offline Edge) ───────────────────
+        # ── TIER 1: Local Ollama Daemon (Targeting local qwen2.5:1.5b) ────
         try:
             payload = {
-                "model": self.model_name,
+                "model": self.local_model,
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
-                "options": {"temperature": 0.1, "num_ctx": 1024, "num_predict": 450}
+                "options": {"temperature": 0.1, "num_ctx": 1024, "num_predict": 350}
             }
-            res = requests.post(self.api_url, json=payload, timeout=3)
+            res = requests.post(self.api_url, json=payload, timeout=45)
             if res.status_code == 200:
                 raw_output = res.json().get("response", "{}")
                 decision = CreditUnderwritingDecision(**json.loads(raw_output))
-                decision.underwriting_rationale = "[Tier 1: Local Edge Ollama] " + decision.underwriting_rationale
-                decision.engine_source = "Tier 1: Local Edge SLM (Ollama)"
+                decision.engine_source = f"Tier 1: Local Edge SLM (Ollama {self.local_model})"
+                print(f"[SUCCESS] Underwritten locally via Ollama ({self.local_model})")
                 return decision
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[INFO] Local Ollama note ({type(e).__name__}), checking Tier 2 / Tier 3...")
 
         # ── TIER 2: Groq Cloud LPU Neural Engine ────────────────────────
         groq_key = self.get_groq_key()
@@ -313,12 +282,12 @@ Respond ONLY with a single valid JSON object matching this schema:
                 
                 chat_completion = client.chat.completions.create(
                     messages=[
-                        {"role": "system", "content": "You are a professional microfinance credit risk auditor. Output strictly a single raw JSON object matching the requested schema. Provide detailed, multi-sentence underwriting rationales."},
+                        {"role": "system", "content": "You are a professional microfinance credit risk auditor. Output strictly a single raw JSON object matching the requested schema. Do not write short summaries. Provide detailed, multi-sentence underwriting rationales."},
                         {"role": "user", "content": prompt}
                     ],
-                    model="allam-2-7b",
+                    model=self.cloud_model,
                     temperature=0.1,
-                    max_tokens=600  # Allows multi-sentence rationales without truncation
+                    max_tokens=500
                 )
                 
                 raw_content = chat_completion.choices[0].message.content
@@ -326,43 +295,7 @@ Respond ONLY with a single valid JSON object matching this schema:
                 json_str = clean_match.group(0) if clean_match else raw_content.strip()
                 
                 decision = CreditUnderwritingDecision(**json.loads(json_str))
-
-                # ── POST-INFERENCE PROGRAMMATIC GUARDRAIL ──────────────────
-                # 1. Catch Empty Shelves
-                if visual_items_count < 5:
-                    decision.credit_score = 350
-                    decision.risk_tier = "Severe"
-                    decision.recommended_loan_limit = 0.0
-                    decision.financial_metrics.inventory_to_sales_ratio = "Severe Discrepancy"
-                    decision.underwriting_rationale = f"[Tier 2: Groq Cloud Neural Engine (allam-2-7b)] Physical store audit revealed empty shelves ({visual_items_count} items). Claimed revenue cannot be verified without stock collateral. Loan rejected."
-                
-                # 2. Catch Dead Stock (Turnover < 0.6x or sales <= 500 on high inventory)
-                elif (turnover_rate < 0.60 or daily_sales <= 500.0) and visual_items_count >= 20:
-                    decision.credit_score = min(decision.credit_score, 590)
-                    decision.risk_tier = "Moderate"
-                    decision.recommended_loan_limit = min(decision.recommended_loan_limit, 12000.0)
-                    if "Stagnant inventory / dead stock detected" not in decision.discrepancy_flags:
-                        decision.discrepancy_flags.append("Stagnant inventory / dead stock detected")
-                    decision.underwriting_rationale = (
-                        f"[Tier 2: Groq Cloud Neural Engine (allam-2-7b)] Stagnant inventory detected. Substantial physical stock ({visual_items_count} items), "
-                        f"but low turnover ({turnover_rate:.2f}x). Capital locked in unsold goods. Capped loan of ₹12,000 recommended."
-                    )
-                
-                # 3. Catch Severe Fraud / Inflation (> 4.0x or high sales on sparse shelf)
-                elif turnover_rate > 4.0 or (visual_items_count < 25 and daily_sales > 5000.0):
-                    decision.credit_score = min(decision.credit_score, 380)
-                    decision.risk_tier = "Severe"
-                    decision.recommended_loan_limit = min(decision.recommended_loan_limit, 2500.0)
-                    decision.financial_metrics.inventory_to_sales_ratio = "Severe Discrepancy"
-                    decision.discrepancy_flags = ["Severe turnover discrepancy", "Revenue inflation detected"]
-                    decision.underwriting_rationale = (
-                        f"[Tier 2: Groq Cloud Neural Engine (allam-2-7b)] Severe revenue inflation detected. Claimed monthly turnover of ₹{daily_sales * 30:,.0f} "
-                        f"cannot be supported by only {visual_items_count} visible shelf items. "
-                        f"Turnover rate ({turnover_rate:.1f}x) exceeds realistic retail limits. "
-                        f"Loan capped at emergency liquidation floor."
-                    )
-
-                decision.engine_source = "Tier 2: Groq Cloud Neural Engine (allam-2-7b)"
+                decision.engine_source = f"Tier 2: Groq Cloud Neural Engine ({self.cloud_model})"
                 return decision
 
             except Exception:
