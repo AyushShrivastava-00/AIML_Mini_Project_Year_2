@@ -145,3 +145,4 @@ with gr.Blocks(title="Micro-Merchant Credit Engine", theme=gr.themes.Soft()) as 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
     demo.launch(server_name="0.0.0.0", server_port=port)
+    
