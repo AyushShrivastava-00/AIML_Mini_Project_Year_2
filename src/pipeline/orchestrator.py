@@ -1,17 +1,22 @@
 """
-Multi-Modal Credit Assessment Pipeline Orchestrator.
-Ingests media (image or video walkthrough with 5-frame max-pooling) and audio interview,
-then calls the vision, voice, and SLM underwriting engines to produce a credit decision.
+Central Multi-Modal Pipeline Orchestrator.
+Hardened with multi-frame max-pooling to eliminate camera transit and occlusion blindness.
 """
-
 import os
-import cv2
+import sys
 import time
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw
+
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from src.vision.inference import ShelfInventoryAuditor
 from src.voice.transcriber import VoiceInterviewTranscriber
 from src.slm.reasoner import CreditUnderwritingEngine
-
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+from src.slm.schema import CreditUnderwritingDecision
 
 
 class CreditAuditPipeline:
@@ -32,66 +37,103 @@ class CreditAuditPipeline:
             groq_api_key=groq_api_key
         )
 
-    def extract_best_video_frame(self, video_path, num_samples=5):
-        """Samples distributed frames across video and selects the frame with highest detected count."""
+    def sample_video_frames(self, video_path, num_samples=5):
+        """
+        Samples distributed frames across the video to capture different store aisles.
+        """
         cap = cv2.VideoCapture(video_path)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
         if total_frames <= 0:
             cap.release()
-            return None, 0, 0.0
+            raise ValueError(f"Invalid or unreadable video file: {video_path}")
 
-        sample_indices = [int(total_frames * (i + 1) / (num_samples + 1)) for i in range(num_samples)]
+        indices = np.linspace(int(total_frames * 0.10), int(total_frames * 0.90), num_samples, dtype=int)
+        frames = []
 
-        best_frame = None
-        max_items = -1
-        best_fill_pct = 0.0
-
-        for idx in sample_indices:
+        for idx in indices:
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
             ret, frame = cap.read()
-            if not ret or frame is None:
-                continue
-
-            annotated, count, fill_pct = self.vision_engine.audit_shelf_image(frame)
-            if count > max_items:
-                max_items = count
-                best_frame = annotated
-                best_fill_pct = fill_pct
+            if ret and frame is not None:
+                frames.append(frame)
 
         cap.release()
+        if not frames:
+            raise ValueError("Could not extract any valid video frames from file.")
+        return frames
 
-        if best_frame is None:
-            # Fallback to reading first frame
-            cap = cv2.VideoCapture(video_path)
-            ret, frame = cap.read()
-            cap.release()
-            if ret and frame is not None:
-                best_frame, max_items, best_fill_pct = self.vision_engine.audit_shelf_image(frame)
+    def annotate_frame(self, bgr_image, conf_threshold=0.25):
+        """
+        Draws green semi-transparent bounding boxes using NMS.
+        """
+        if bgr_image is None or bgr_image.size == 0:
+            bgr_image = np.zeros((640, 640, 3), dtype=np.uint8)
 
-        return best_frame, max(0, max_items), best_fill_pct
+        tensor, (orig_h, orig_w) = self.vision_engine.preprocess(bgr_image)
+        outputs = self.vision_engine.session.run(None, {self.vision_engine.input_name: tensor})
+        preds = np.squeeze(outputs[0]).T
+
+        boxes, scores = [], []
+        scale_x = orig_w / float(self.vision_engine.input_width)
+        scale_y = orig_h / float(self.vision_engine.input_height)
+
+        for pred in preds:
+            conf = float(pred[4])
+            if conf >= conf_threshold:
+                cx, cy, w, h = float(pred[0]), float(pred[1]), float(pred[2]), float(pred[3])
+                x1 = int((cx - (w / 2.0)) * scale_x)
+                y1 = int((cy - (h / 2.0)) * scale_y)
+                box_w = int(w * scale_x)
+                box_h = int(h * scale_y)
+                boxes.append([x1, y1, box_w, box_h])
+                scores.append(conf)
+
+        indices = cv2.dnn.NMSBoxes(boxes, scores, score_threshold=conf_threshold, nms_threshold=0.45)
+
+        pil_img = Image.fromarray(cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(pil_img, "RGBA")
+
+        detected_count = 0
+        if len(indices) > 0:
+            flat_indices = np.array(indices).flatten()
+            detected_count = len(flat_indices)
+            for idx in flat_indices:
+                bx, by, bw, bh = boxes[idx]
+                draw.rectangle([bx, by, bx + bw, by + bh], fill=(0, 255, 0, 70), outline=(0, 255, 0, 255), width=3)
+
+        return pil_img, detected_count
 
     def run_full_audit(self, media_path, audio_path, store_category="Grocery / Kirana (FMCG)"):
-        start_time = time.time()
+        """
+        Runs full multi-modal audit with multi-frame max-pooling on video.
+        """
+        pipeline_start = time.perf_counter()
 
-        # 1. Vision Module Execution (Handles video or static image)
-        ext = os.path.splitext(media_path)[-1].lower()
-        if ext in [".mp4", ".avi", ".mov", ".mkv"]:
-            annotated_img, detected_count, shelf_fill_pct = self.extract_best_video_frame(media_path)
+        # 1. Computer Vision Processing with Multi-Frame Max-Pooling
+        is_video = media_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))
+        best_count = -1
+        best_annotated = None
+
+        if is_video:
+            frames = self.sample_video_frames(media_path, num_samples=5)
+            for frame in frames:
+                annotated_img, count = self.annotate_frame(frame)
+                if count > best_count:
+                    best_count = count
+                    best_annotated = annotated_img
         else:
-            raw_img = cv2.imread(media_path)
-            annotated_img, detected_count, shelf_fill_pct = self.vision_engine.audit_shelf_image(raw_img)
+            key_frame = cv2.imread(media_path)
+            if key_frame is None:
+                key_frame = np.zeros((640, 640, 3), dtype=np.uint8)
+            best_annotated, best_count = self.annotate_frame(key_frame)
 
-        # Convert BGR (OpenCV) to RGB (for Streamlit & PDF display)
-        if annotated_img is not None:
-            annotated_rgb = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
-        else:
-            annotated_rgb = None
+        detected_count = max(0, best_count)
+        shelf_fill_pct = min(100.0, (detected_count / 30.0) * 100.0)
 
-        # 2. Voice Transcription Execution
-        transcript = self.voice_engine.transcribe_interview(audio_path)
+        # 2. Voice Transcription
+        voice_result = self.voice_engine.transcribe(audio_path)
+        transcript = voice_result["transcript"]
 
-        # 3. SLM Financial Underwriting Execution
+        # 3. SLM Financial Underwriting
         slm_decision = self.slm_engine.evaluate_merchant(
             visual_items_count=detected_count,
             shelf_fill_pct=shelf_fill_pct,
@@ -99,13 +141,14 @@ class CreditAuditPipeline:
             store_category=store_category
         )
 
-        total_latency = round(time.time() - start_time, 2)
+        total_latency = time.perf_counter() - pipeline_start
 
         return {
-            "annotated_image": annotated_rgb,
+            "annotated_image": best_annotated,
             "detected_items": detected_count,
             "shelf_fill_pct": shelf_fill_pct,
             "transcript": transcript,
+            "audio_duration_sec": voice_result.get("duration_sec", 0),
             "decision": slm_decision,
-            "total_latency_sec": total_latency
+            "total_latency_sec": round(total_latency, 2)
         }
