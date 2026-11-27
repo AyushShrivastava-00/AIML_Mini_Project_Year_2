@@ -4,6 +4,7 @@ Layer 1: Deterministic Microfinance Scoring Matrix (Zero Hallucination Math)
 Layer 2: Generative SLM Audit Synthesizer (Local Ollama / Groq Cloud / Fallback)
 Hardened with multi-category valuation, DSCR micro-tenors, and dialectal Hinglish extraction.
 """
+
 import os
 import re
 import json
@@ -50,25 +51,36 @@ class CreditUnderwritingEngine:
 
         # 1. Merchant Name Detection
         merchant_name = "Informal Merchant"
-        if "manoj" in norm or "मनोज" in text_clean: merchant_name = "Manoj Gupta"
-        elif "rajesh" in norm or "राजेश" in text_clean: merchant_name = "Rajesh Sharma"
-        elif "sunita" in norm or "सुनीता" in text_clean: merchant_name = "Sunita Devi"
-        elif "imran" in norm or "इमरान" in text_clean: merchant_name = "Imran Khan"
-        elif "suresh" in norm: merchant_name = "Suresh Patel"
+        if "manoj" in norm or "मनोज" in text_clean:
+            merchant_name = "Manoj Gupta"
+        elif "rajesh" in norm or "राजेश" in text_clean:
+            merchant_name = "Rajesh Sharma"
+        elif "sunita" in norm or "सुनीता" in text_clean:
+            merchant_name = "Sunita Devi"
+        elif "imran" in norm or "इमरान" in text_clean:
+            merchant_name = "Imran Khan"
+        elif "suresh" in norm or "सुरेश" in text_clean:
+            merchant_name = "Suresh Patel"
+        elif "ramesh" in norm or "रमेश" in text_clean:
+            merchant_name = "Ramesh Kumar"
+        elif "anita" in norm or "अनीता" in text_clean:
+            merchant_name = "Anita Verma"
         else:
-            name_match = re.search(r"(?:my name is|name is|i am|mera naam|myra nam|मेरा नाम)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)", text_clean, re.I)
+            name_match = re.search(
+                r"(?:my name is|name is|i am|mera naam|myra nam|मेरा नाम)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+                text_clean, re.I
+            )
             if name_match:
                 cand = name_match.group(1).strip().title()
                 if cand.lower() not in ["running", "speaking", "here", "sir", "hai", "ki", "dukana"]:
                     merchant_name = cand
 
         # 2. Daily Sales Extraction (Phonetic, Slang fractions & Hindi numbers)
-        daily_sales = 2000.0  # Conservative fallback
+        daily_sales = 2000.0  # Conservative baseline fallback
 
-        # Check for fractional colloquial numbers
         if any(w in norm for w in ["dedh hazar", "dadh hazar", "1.5 hazar", "1500"]):
             daily_sales = 1500.0
-        elif any(w in norm for w in ["dhai hazar", "dhai hazar", "2.5 hazar", "2500"]):
+        elif any(w in norm for w in ["dhai hazar", "2.5 hazar", "2500"]):
             daily_sales = 2500.0
         elif any(w in norm for w in ["chaur hazar", "char hazar", "4 hazar", "4000"]):
             daily_sales = 4000.0
@@ -81,11 +93,17 @@ class CreditUnderwritingEngine:
         elif any(w in norm for w in ["das hazar", "10 hazar", "10000"]):
             daily_sales = 10000.0
         elif any(w in norm for w in ["do sau", "200", "dhai sau", "250", "teen sau", "300"]):
-            if "300" in norm or "teen sau" in norm: daily_sales = 300.0
-            elif "200" in norm or "do sau" in norm: daily_sales = 200.0
-            else: daily_sales = 300.0
+            if "300" in norm or "teen sau" in norm:
+                daily_sales = 300.0
+            elif "200" in norm or "do sau" in norm:
+                daily_sales = 200.0
+            else:
+                daily_sales = 300.0
         else:
-            rev_match = re.search(r"(?:daily sales|turnover|sales|बिक्री|धंधा|कमाई|ruse ka dhandha)[^0-9\n]{0,25}?([0-9]+(?:,[0-9]+)?)", norm)
+            rev_match = re.search(
+                r"(?:daily sales|turnover|sales|बिक्री|धंधा|कमाई|ruse ka dhandha)[^0-9\n]{0,25}?([0-9]+(?:,[0-9]+)?)",
+                norm
+            )
             if rev_match:
                 daily_sales = float(rev_match.group(1).replace(",", ""))
 
@@ -105,6 +123,8 @@ class CreditUnderwritingEngine:
             monthly_rent = 2000.0
         elif any(w in norm for w in ["4 hazar", "char hazar", "4000"]):
             monthly_rent = 4000.0
+        elif any(w in norm for w in ["1 hazar", "ek hazar", "1000"]):
+            monthly_rent = 1000.0
 
         return {
             "merchant_name": merchant_name,
@@ -167,7 +187,7 @@ class CreditUnderwritingEngine:
                 "Capped at Rs. 2,500 emergency liquidity line."
             )
 
-        # ── ARCHETYPE 3: Dead Stock / Stagnant Capital (Rajesh Sharma) ────
+        # ── ARCHETYPE 3: Dead Stock / Stagnant Capital (Rajesh / Ramesh) ──
         elif items_count >= 25 and daily_sales <= 600.0:
             credit_score = 585
             risk_tier = "Moderate"
@@ -196,7 +216,7 @@ class CreditUnderwritingEngine:
                 f"Approved for entry-level working capital line of Rs. {recommended_loan:,.0f} on a {tenor_days}-day daily repayment schedule."
             )
 
-        # ── ARCHETYPE 5: Healthy Verified Retail Enterprise (Manoj Gupta) ──
+        # ── ARCHETYPE 5: Healthy Verified Retail Enterprise (Manoj / Suresh)
         else:
             credit_score = min(810, int(750 + (shelf_fill_pct * 0.4)))
             risk_tier = "Low"
@@ -263,24 +283,43 @@ Output strictly raw JSON:
   "underwriting_rationale": "<your 3-sentence rationale here>"
 }}
 """
-        # Tier 1: Local Ollama
+        # ── Tier 1: Local Ollama (Primary Edge Pipeline) ──────────────────
         try:
             payload = {
                 "model": self.local_model,
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
-                "options": {"temperature": 0.1, "num_ctx": 1024, "num_predict": 250}
+                "options": {
+                    "temperature": 0.1,
+                    "num_ctx": 1024,
+                    "num_predict": 250
+                }
             }
-            res = requests.post(self.api_url, json=payload, timeout=8)
+            # Extended to 40 seconds so CPU token generation completes cleanly
+            res = requests.post(self.api_url, json=payload, timeout=40)
             if res.status_code == 200:
-                data = json.loads(res.json().get("response", "{}"))
-                if "underwriting_rationale" in data and len(data["underwriting_rationale"]) > 30:
-                    return data["underwriting_rationale"], f"Tier 1: Local Edge SLM (Ollama {self.local_model})"
-        except Exception:
-            pass
+                raw_response = res.json().get("response", "{}")
+                clean_match = re.search(r"\{.*\}", raw_response, re.DOTALL)
+                json_str = clean_match.group(0) if clean_match else raw_response.strip()
+                data = json.loads(json_str)
 
-        # Tier 2: Groq Cloud LPU
+                text = (
+                    data.get("underwriting_rationale")
+                    or data.get("rationale")
+                    or data.get("memo")
+                    or data.get("summary")
+                    or ""
+                )
+                if len(text) > 20:
+                    print(f"✅ [SUCCESS] Tier 1 Active: Generated via Ollama ({self.local_model})")
+                    return text, f"Tier 1: Local Edge SLM (Ollama {self.local_model})"
+        except requests.exceptions.Timeout:
+            print("⚠️ [OLLAMA TIMEOUT] Generation exceeded 40s on CPU. Trying Tier 2/3...")
+        except Exception as e:
+            print(f"⚠️ [OLLAMA NOTE] {type(e).__name__}: {e}. Checking Tier 2/3...")
+
+        # ── Tier 2: Groq Cloud LPU ───────────────────────────────────────
         groq_key = self.get_groq_key()
         if groq_key:
             try:
@@ -288,7 +327,7 @@ Output strictly raw JSON:
                 client = Groq(api_key=groq_key)
                 completion = client.chat.completions.create(
                     messages=[
-                        {"role": "system", "content": "You are a professional credit auditor. Output strictly a single JSON object."},
+                        {"role": "system", "content": "You are a professional credit auditor. Output strictly a single JSON object with key 'underwriting_rationale'."},
                         {"role": "user", "content": prompt}
                     ],
                     model=self.cloud_model,
@@ -296,13 +335,26 @@ Output strictly raw JSON:
                     max_tokens=250,
                     response_format={"type": "json_object"}
                 )
-                data = json.loads(completion.choices[0].message.content)
-                if "underwriting_rationale" in data and len(data["underwriting_rationale"]) > 30:
-                    return data["underwriting_rationale"], f"Tier 2: Groq Cloud Neural Engine ({self.cloud_model})"
-            except Exception:
-                pass
+                raw_content = completion.choices[0].message.content
+                clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                json_str = clean_match.group(0) if clean_match else raw_content.strip()
+                data = json.loads(json_str)
 
-        # Tier 3: Deterministic Blueprint Fallback
+                text = (
+                    data.get("underwriting_rationale")
+                    or data.get("rationale")
+                    or data.get("memo")
+                    or data.get("summary")
+                    or ""
+                )
+                if len(text) > 20:
+                    print(f"✅ [SUCCESS] Tier 2 Active: Generated via Groq Cloud ({self.cloud_model})")
+                    return text, f"Tier 2: Groq Cloud Neural Engine ({self.cloud_model})"
+            except Exception as e:
+                print(f"⚠️ [GROQ NOTE] {e}. Falling to Tier 3...")
+
+        # ── Tier 3: Deterministic Blueprint Fallback ─────────────────────
+        print("ℹ️ [INFO] Serving via Tier 3 (Regulatory Microfinance Scorecard)")
         return scorecard["underwriting_rationale"], "Tier 3: Regulatory Microfinance Scorecard"
 
     def evaluate_merchant(self, visual_items_count, shelf_fill_pct, interview_transcript, store_category="Grocery / Kirana (FMCG)"):
