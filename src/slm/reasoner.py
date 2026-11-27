@@ -15,7 +15,7 @@ from src.slm.schema import CreditUnderwritingDecision, FinancialAnalysis
 class CreditUnderwritingEngine:
     def __init__(self,
                  local_model="qwen2.5:1.5b",
-                 cloud_model="openai/gpt-oss-20b",
+                 cloud_model="qwen/qwen3.8-27b",
                  base_url="http://localhost:11434",
                  groq_api_key=None):
         self.local_model = local_model
@@ -341,9 +341,9 @@ Output strictly raw JSON:
 
                 # Ordered preference of production text models
                 preference_list = [
+                    "qwen/qwen3.8-27b",
                     "openai/gpt-oss-20b",
                     "openai/gpt-oss-120b",
-                    "qwen/qwen3.8-27b",
                     "allam-2-7b"
                 ]
 
@@ -361,15 +361,19 @@ Output strictly raw JSON:
                     selected_model = text_models[0] if text_models else None
 
                 if selected_model:
+                    # Model-agnostic chat request
+                    combined_prompt = (
+                        "You are an institutional microfinance credit auditor.\n"
+                        "Return strictly a raw JSON object with the key 'underwriting_rationale'.\n\n"
+                        + prompt
+                    )
                     completion = client.chat.completions.create(
                         messages=[
-                            {"role": "system", "content": "You are a professional microfinance credit auditor. Output strictly a JSON object with key 'underwriting_rationale'."},
-                            {"role": "user", "content": prompt}
+                            {"role": "user", "content": combined_prompt}
                         ],
                         model=selected_model,
                         temperature=0.1,
-                        max_tokens=250,
-                        response_format={"type": "json_object"}
+                        max_tokens=1024
                     )
                     raw_content = completion.choices[0].message.content
                     clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
