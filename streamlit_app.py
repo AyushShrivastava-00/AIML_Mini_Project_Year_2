@@ -54,11 +54,24 @@ st.markdown(textwrap.dedent("""
 @st.cache_resource
 def load_pipeline():
     absolute_onnx_path = os.path.join(ROOT_DIR, "models", "best.onnx")
+
+    # Safe retrieval of GROQ_API_KEY from Streamlit secrets or environment
+    groq_api_key = None
+    try:
+        if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+            groq_api_key = str(st.secrets["GROQ_API_KEY"]).strip()
+    except Exception:
+        pass
+
+    if not groq_api_key:
+        groq_api_key = os.environ.get("GROQ_API_KEY", None)
+
     return CreditAuditPipeline(
         onnx_model_path=absolute_onnx_path,
         whisper_size="tiny",
         local_slm="qwen2.5:1.5b",
-        cloud_slm="openai/gpt-oss-20b"
+        cloud_slm="openai/gpt-oss-20b",
+        groq_api_key=groq_api_key
     )
 
 

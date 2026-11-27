@@ -16,10 +16,12 @@ class CreditUnderwritingEngine:
     def __init__(self,
                  local_model="qwen2.5:1.5b",
                  cloud_model="openai/gpt-oss-20b",
-                 base_url="http://localhost:11434"):
+                 base_url="http://localhost:11434",
+                 groq_api_key=None):
         self.local_model = local_model
         self.cloud_model = cloud_model
         self.api_url = f"{base_url}/api/generate"
+        self.explicit_groq_key = groq_api_key
 
         # Multi-category retail unit valuation and inventory depth constants
         self.category_profiles = {
@@ -30,15 +32,24 @@ class CreditUnderwritingEngine:
         }
 
     def get_groq_key(self):
+        # 1. Direct explicit key passed into constructor
+        if self.explicit_groq_key and len(str(self.explicit_groq_key).strip()) > 10:
+            return str(self.explicit_groq_key).strip()
+
+        # 2. Environment variable
         key = os.environ.get("GROQ_API_KEY")
-        if not key:
-            try:
-                import streamlit as st
-                if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-                    key = st.secrets["GROQ_API_KEY"]
-            except Exception:
-                pass
-        return key
+        if key and len(key.strip()) > 10:
+            return key.strip()
+
+        # 3. Streamlit secrets
+        try:
+            import streamlit as st
+            if hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
+                return str(st.secrets["GROQ_API_KEY"]).strip()
+        except Exception:
+            pass
+
+        return None
 
     # ──────────────────────────────────────────────────────────────────────────
     # LAYER 1: ROBUST DIALECTAL & TEMPORAL TELEMETRY EXTRACTION
@@ -378,6 +389,8 @@ Output strictly raw JSON:
 
             except Exception as e:
                 print(f"⚠️ [GROQ NOTE] {e}. Falling to Tier 3...")
+        else:
+            print("⚠️ [GROQ NOTE] No GROQ_API_KEY detected in environment, parameters, or st.secrets. Falling to Tier 3...")
 
         # ── Tier 3: Deterministic Blueprint Fallback ─────────────────────
         print("ℹ️ [INFO] Serving via Tier 3 (Regulatory Microfinance Scorecard)")
