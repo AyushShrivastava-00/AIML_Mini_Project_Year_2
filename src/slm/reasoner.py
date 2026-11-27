@@ -1,7 +1,7 @@
 """
 Institutional Neuro-Symbolic Credit Underwriting Engine:
 Layer 1: Deterministic Microfinance Scoring Matrix (Zero Hallucination Math)
-Layer 2: Generative SLM Audit Synthesizer (Local Ollama / Groq Cloud / Fallback)
+Layer 2: Generative SLM Audit Synthesizer (Local Ollama / Dynamic Groq Cloud / Fallback)
 Hardened with multi-category valuation, DSCR micro-tenors, and dialectal Hinglish extraction.
 """
 
@@ -15,7 +15,7 @@ from src.slm.schema import CreditUnderwritingDecision, FinancialAnalysis
 class CreditUnderwritingEngine:
     def __init__(self,
                  local_model="qwen2.5:1.5b",
-                 cloud_model="llama-3.1-8b-instant",
+                 cloud_model="openai/gpt-oss-20b",
                  base_url="http://localhost:11434"):
         self.local_model = local_model
         self.cloud_model = cloud_model
@@ -293,10 +293,9 @@ Output strictly raw JSON:
                 "options": {
                     "temperature": 0.1,
                     "num_ctx": 1024,
-                    "num_predict": 250
+                    "num_predict": 180
                 }
             }
-            # Extended to 40 seconds so CPU token generation completes cleanly
             res = requests.post(self.api_url, json=payload, timeout=40)
             if res.status_code == 200:
                 raw_response = res.json().get("response", "{}")
@@ -315,41 +314,68 @@ Output strictly raw JSON:
                     print(f"✅ [SUCCESS] Tier 1 Active: Generated via Ollama ({self.local_model})")
                     return text, f"Tier 1: Local Edge SLM (Ollama {self.local_model})"
         except requests.exceptions.Timeout:
-            print("⚠️ [OLLAMA TIMEOUT] Generation exceeded 40s on CPU. Trying Tier 2/3...")
+            print("⚠️ [OLLAMA TIMEOUT] Took > 40s. Checking Tier 2/3...")
         except Exception as e:
             print(f"⚠️ [OLLAMA NOTE] {type(e).__name__}: {e}. Checking Tier 2/3...")
 
-        # ── Tier 2: Groq Cloud LPU ───────────────────────────────────────
+        # ── Tier 2: Groq Cloud LPU (Dynamic Auto-Discovery) ───────────────
         groq_key = self.get_groq_key()
         if groq_key:
             try:
                 from groq import Groq
                 client = Groq(api_key=groq_key)
-                completion = client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": "You are a professional credit auditor. Output strictly a single JSON object with key 'underwriting_rationale'."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    model=self.cloud_model,
-                    temperature=0.1,
-                    max_tokens=250,
-                    response_format={"type": "json_object"}
-                )
-                raw_content = completion.choices[0].message.content
-                clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
-                json_str = clean_match.group(0) if clean_match else raw_content.strip()
-                data = json.loads(json_str)
 
-                text = (
-                    data.get("underwriting_rationale")
-                    or data.get("rationale")
-                    or data.get("memo")
-                    or data.get("summary")
-                    or ""
-                )
-                if len(text) > 20:
-                    print(f"✅ [SUCCESS] Tier 2 Active: Generated via Groq Cloud ({self.cloud_model})")
-                    return text, f"Tier 2: Groq Cloud Neural Engine ({self.cloud_model})"
+                # Fetch live active models on this account
+                available_models = [m.id for m in client.models.list().data]
+
+                # Ordered preference of production text models
+                preference_list = [
+                    "openai/gpt-oss-20b",
+                    "openai/gpt-oss-120b",
+                    "qwen/qwen3.8-27b",
+                    "allam-2-7b"
+                ]
+
+                selected_model = None
+                for cand in preference_list:
+                    if cand in available_models:
+                        selected_model = cand
+                        break
+
+                if not selected_model:
+                    text_models = [
+                        m for m in available_models
+                        if "whisper" not in m and "guard" not in m and "safeguard" not in m
+                    ]
+                    selected_model = text_models[0] if text_models else None
+
+                if selected_model:
+                    completion = client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": "You are a professional microfinance credit auditor. Output strictly a JSON object with key 'underwriting_rationale'."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        model=selected_model,
+                        temperature=0.1,
+                        max_tokens=250,
+                        response_format={"type": "json_object"}
+                    )
+                    raw_content = completion.choices[0].message.content
+                    clean_match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+                    json_str = clean_match.group(0) if clean_match else raw_content.strip()
+                    data = json.loads(json_str)
+
+                    text = (
+                        data.get("underwriting_rationale")
+                        or data.get("rationale")
+                        or data.get("memo")
+                        or data.get("summary")
+                        or ""
+                    )
+                    if len(text) > 20:
+                        print(f"✅ [SUCCESS] Tier 2 Active: Generated via Groq ({selected_model})")
+                        return text, f"Tier 2: Groq Cloud Neural Engine ({selected_model})"
+
             except Exception as e:
                 print(f"⚠️ [GROQ NOTE] {e}. Falling to Tier 3...")
 

@@ -2,6 +2,7 @@
 Micro-Merchant Informal Credit Assessment Engine - Streamlit Web Application.
 Interactive field loan officer dashboard with store category selection and DSCR telemetry.
 """
+
 import os
 import sys
 import tempfile
@@ -57,8 +58,9 @@ def load_pipeline():
         onnx_model_path=absolute_onnx_path,
         whisper_size="tiny",
         local_slm="qwen2.5:1.5b",
-        cloud_slm="llama-3.1-8b-instant"
+        cloud_slm="openai/gpt-oss-20b"
     )
+
 
 pipeline = load_pipeline()
 
@@ -199,7 +201,7 @@ with col_output:
                     st.markdown(card_html, unsafe_allow_html=True)
 
                     # 3. Audio Transcript
-                    st.markdown("##### 🎤 Spoken Interview Transcript (Whisper.cpp):")
+                    st.markdown("##### 🎤 Spoken Interview Transcript (Faster-Whisper):")
                     st.markdown(f'<div class="transcript-bubble">"{results["transcript"]}"</div>', unsafe_allow_html=True)
                     st.write("")
 
