@@ -31,3 +31,6 @@ doubts.txt
 
 # Temporary test scripts
 test_groq.py
+
+.streamlit
+secrets.toml
