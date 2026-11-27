@@ -2,7 +2,8 @@
 Institutional Neuro-Symbolic Credit Underwriting Engine:
 Layer 1: Deterministic Microfinance Scoring Matrix (Zero Hallucination Math)
 Layer 2: Generative SLM Audit Synthesizer (Local Ollama / Dynamic Groq Cloud / Fallback)
-Hardened with multi-category valuation, DSCR micro-tenors, and dialectal Hinglish extraction.
+Hardened with multi-category valuation, DSCR micro-tenors, dialectal Hinglish extraction,
+and strict Inventory Turnover Rate (ITR) velocity ceilings to catch turnover inflation.
 """
 
 import os
@@ -166,6 +167,7 @@ class CreditUnderwritingEngine:
         daily_net_margin = net_monthly_margin / 30.0
 
         turnover_rate = round(monthly_cogs / max(eiv, 1.0), 2)
+        turnover_ceiling = profile.get("turnover_max", 5.8)
         discrepancy_flags = []
 
         # ── ARCHETYPE 1: Abandoned / Zero-Stock Premises ──────────────────
@@ -183,18 +185,23 @@ class CreditUnderwritingEngine:
                 "Application rejected to protect institutional capital."
             )
 
-        # ── ARCHETYPE 2: Turnover Inflation / Retail Fraud ─────────────────
-        elif items_count < 15 and daily_sales >= 5000.0:
+        # ── ARCHETYPE 2: Turnover Inflation / Retail Fraud (Calibrated) ────
+        # Triggered if items are too low for high sales OR turnover velocity exceeds category physics
+        elif (items_count < 25 and daily_sales >= 5000.0) or (turnover_rate > turnover_ceiling):
             credit_score = 360
             risk_tier = "Severe"
             recommended_loan = 2500.0
             tenor_days = 60
             safe_daily_emi = 50.0
             ratio_status = "Severe Discrepancy"
-            discrepancy_flags.append(f"Turnover inflation: Stated Rs. {daily_sales:,.0f}/day unsupported by only {items_count} visible items")
+            discrepancy_flags.append(
+                f"Turnover inflation: Stated Rs. {daily_sales:,.0f}/day ({turnover_rate:.1f}x velocity) "
+                f"exceeds category physical ceiling ({turnover_ceiling:.1f}x) for {items_count} shelf units"
+            )
             rationale = (
                 f"High-risk turnover inflation detected. Stated monthly sales of Rs. {monthly_sales:,.0f} "
-                f"are irreconcilable with an observed stock of only {items_count} shelf units in this {store_category}. "
+                f"imply an abnormal turnover velocity of {turnover_rate:.2f}x (category max: {turnover_ceiling:.1f}x), "
+                f"which is physically unsupported by only {items_count} observed shelf units in this {store_category}. "
                 "Capped at Rs. 2,500 emergency liquidity line."
             )
 
@@ -361,7 +368,6 @@ Output strictly raw JSON:
                     selected_model = text_models[0] if text_models else None
 
                 if selected_model:
-                    # Model-agnostic chat request
                     combined_prompt = (
                         "You are an institutional microfinance credit auditor.\n"
                         "Return strictly a raw JSON object with the key 'underwriting_rationale'.\n\n"
